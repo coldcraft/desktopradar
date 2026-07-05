@@ -101,6 +101,26 @@ fn test_toast(app: AppHandle) {
     send_test_toast(&app);
 }
 
+/// Open the aircraft's live track on globe.adsbexchange.com in the default
+/// browser. The globe map is free to eyeball (the paid part is the API);
+/// this is the "dig into a NORDO" escape hatch. Opens even for a contact
+/// that has faded from local scope, since the card keeps its hex.
+#[tauri::command]
+fn open_globe(hex: String) -> Result<String, String> {
+    let clean: String = hex
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_lowercase();
+    if clean.is_empty() {
+        return Err("no ICAO hex to track".into());
+    }
+    let url = format!("https://globe.adsbexchange.com/?icao={clean}");
+    // opener uses ShellExecuteW on Windows — no console flash.
+    opener::open_browser(&url).map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
 /// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
 /// data URL so the webview never does HTTP and the canvas never taints.
 /// Cached per 5-minute bucket, matching IEM's refresh cadence.
@@ -544,6 +564,7 @@ fn main() {
             get_route,
             get_wx_tile,
             test_toast,
+            open_globe,
             set_activatable
         ])
         .setup(|app| {

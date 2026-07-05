@@ -1,6 +1,6 @@
 [package]
 name = "adsb-radar"
-version = "0.1.1"
+version = "0.1.2"
 description = "Desktop ADS-B radar gadget"
 edition = "2021"
 
@@ -16,6 +16,7 @@ reqwest = { version = "0.12", features = ["json", "gzip"] }
 tokio = { version = "1", features = ["time"] }
 dirs = "5"
 base64 = "0.22"
+opener = "0.7"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

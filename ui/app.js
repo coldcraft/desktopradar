@@ -540,6 +540,9 @@ document.getElementById("card-close").addEventListener("click", () => {
   cardHex = null;
   highlightHex = null;
 });
+document.getElementById("card-globe").addEventListener("click", () => {
+  if (cardHex) invoke("open_globe", { hex: cardHex }).catch(() => {});
+});
 
 // ————— contacts list —————
 function renderEvents() {

@@ -110,6 +110,11 @@ aircraft's card.
   tiles and returned to the webview as data URLs (no page HTTP, no canvas
   taint), drawn dim beneath the grid so the phosphor look survives. The
   toggle persists in config (`wx_enabled`).
+- **↗ TRACK** (aircraft card): opens the contact's live track on
+  `globe.adsbexchange.com` in the default browser — the "dig into a NORDO"
+  escape hatch. The globe map is free to eyeball (only the API is paid).
+  Works even after a contact fades from local scope, since the card keeps
+  its hex.
 
 ## Window behavior
 
