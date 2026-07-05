@@ -14,6 +14,12 @@ let lastError = null;
 let zoomKm = 30;
 let trails = new Map(); // hex -> [{lat, lon, t}]
 let hitboxes = []; // [{x, y, ac}] screen-space, rebuilt each frame
+// PPI state: what's DRAWN is frozen at the last beam crossing, not the poll.
+let latestByHex = new Map(); // hex -> freshest aircraft data from poll A
+let painted = new Map(); // hex -> { ac, t } — snapshot taken as the beam passed
+let prevSweep = 0;
+const SWEEP_MS = 4000;
+const TAU = Math.PI * 2;
 let hoverHex = null;
 let highlightHex = null;
 let cardHex = null;
@@ -95,6 +101,19 @@ function draw(tms) {
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
   ctx.clip();
 
+  // NEXRAD underlay — dim, beneath the grid, so the phosphor vibe survives
+  if (wx.on && wx.tiles.length) {
+    ctx.globalAlpha = 0.5;
+    for (const t of wx.tiles) {
+      const nw = kmOffsets({ lat: t.n, lon: t.w });
+      const se = kmOffsets({ lat: t.s, lon: t.e });
+      const x0 = cx + nw.dx * scale, y0 = cy - nw.dy * scale;
+      const x1 = cx + se.dx * scale, y1 = cy - se.dy * scale;
+      ctx.drawImage(t.img, x0, y0, x1 - x0, y1 - y0);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // grid: rings + crosshair + degree ticks
   ctx.strokeStyle = "rgba(90, 220, 140, 0.22)";
   ctx.fillStyle = "rgba(140, 235, 175, 0.5)";
@@ -148,11 +167,35 @@ function draw(tms) {
   ctx.lineTo(cx + Math.cos(beam) * R, cy + Math.sin(beam) * R);
   ctx.stroke();
 
+  // PPI paint pass: a blip's drawn position refreshes only when the beam
+  // crosses its latest bearing — dots update under the sweep, not in unison.
+  {
+    const step = (sweepAng - prevSweep + TAU) % TAU;
+    if (step > 0) {
+      for (const [hex, a] of latestByHex) {
+        const off = kmOffsets(a);
+        const ang = (Math.atan2(off.dx, off.dy) + TAU) % TAU;
+        const d = (ang - prevSweep + TAU) % TAU;
+        if (d > 0 && d <= step) {
+          painted.set(hex, { ac: a, t: tms });
+          let tr = trails.get(hex);
+          if (!tr) { tr = []; trails.set(hex, tr); }
+          const last = tr[tr.length - 1];
+          if (!last || last.lat !== a.lat || last.lon !== a.lon) {
+            tr.push({ lat: a.lat, lon: a.lon, t: Date.now() });
+            if (tr.length > 40) tr.shift();
+          }
+        }
+      }
+    }
+    prevSweep = sweepAng;
+  }
+
   // trails
   for (const [hex, pts] of trails) {
     if (pts.length < 2) continue;
-    const ac = snapshot.ac.find(a => a.hex === hex);
-    const col = ac ? altColor(ac.alt_baro) : "hsl(140,70%,60%)";
+    const src = painted.get(hex);
+    const col = src ? altColor(src.ac.alt_baro) : "hsl(140,70%,60%)";
     for (let i = 1; i < pts.length; i++) {
       const p0 = kmOffsets(pts[i - 1]), p1 = kmOffsets(pts[i]);
       ctx.strokeStyle = col;
@@ -166,20 +209,30 @@ function draw(tms) {
   }
   ctx.globalAlpha = 1;
 
-  // blips
+  // blips — drawn from their last-painted state, decaying until repainted;
+  // contacts with no fresh data ghost out over ~16 s
   hitboxes = [];
-  const visible = snapshot.ac.filter(a => a.lat != null && a.lon != null && a.dst_km != null && a.dst_km <= zoomKm * 1.06);
+  const visible = [];
+  for (const [hex, p] of painted) {
+    const live = latestByHex.has(hex);
+    const age = tms - p.t;
+    if (!live && age > 16000) {
+      painted.delete(hex);
+      continue;
+    }
+    if (p.ac.dst_km == null || p.ac.dst_km > zoomKm * 1.06) continue;
+    visible.push({ ac: p.ac, live, age });
+  }
   const drawLabels = visible.length <= 18;
-  for (const ac of visible) {
+  for (const { ac, live, age } of visible) {
     const { dx, dy } = kmOffsets(ac);
     const x = cx + dx * scale, y = cy - dy * scale;
     hitboxes.push({ x, y, ac });
 
-    // phosphor afterglow: brightest just after the beam passes
-    const blipAng = Math.atan2(dx, dy); // 0 = north, cw — matches sweepAng
-    let behind = sweepAng - blipAng;
-    behind = ((behind % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const glow = Math.max(0.45, 1.15 - (behind / (Math.PI * 2)) * 1.5);
+    // phosphor decay: bright at paint, dimming until the next pass
+    let glow = Math.min(1, Math.max(0.45, 1.15 - (age / SWEEP_MS) * 1.5));
+    if (!live) glow *= Math.max(0, 1 - Math.max(0, age - 8000) / 8000);
+    if (glow <= 0.02) continue;
 
     const col = ac.is_emergency ? "#ff5546" : altColor(ac.alt_baro);
     ctx.save();
@@ -324,6 +377,78 @@ canvas.addEventListener("click", ev => {
   if (hit) openCard(hit.ac.hex);
 });
 
+// ————— NEXRAD weather underlay —————
+// Tiles come through Rust (get_wx_tile) as data URLs: the webview does no
+// HTTP and the canvas never taints. IEM refreshes ~5-minutely; so do we.
+const wx = { on: false, tiles: [], sig: "", lastFetch: 0, fetching: false };
+
+function tile2lon(x, z) { return (x / 2 ** z) * 360 - 180; }
+function tile2lat(y, z) {
+  return (180 / Math.PI) * Math.atan(Math.sinh(Math.PI - (2 * Math.PI * y) / 2 ** z));
+}
+
+async function wxRefresh(force) {
+  if (!wx.on || wx.fetching || !cfg) return;
+  const lat = cfg.home_lat, lon = cfg.home_lon;
+  const lat2ty = (la, z) => {
+    const r = (la * Math.PI) / 180;
+    return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** z);
+  };
+  // pick a zoom where the disc spans a handful of tiles; back off if the
+  // math ever asks for a silly number of fetches
+  let z = Math.max(4, Math.min(10,
+    Math.round(Math.log2((40075 * Math.cos((lat * Math.PI) / 180)) / zoomKm)) - 1));
+  let x0, x1, y0, y1;
+  for (;;) {
+    const latSpan = zoomKm / 110.574;
+    const lonSpan = zoomKm / (111.32 * Math.cos((lat * Math.PI) / 180));
+    x0 = Math.floor(((lon - lonSpan + 180) / 360) * 2 ** z);
+    x1 = Math.floor(((lon + lonSpan + 180) / 360) * 2 ** z);
+    y0 = lat2ty(lat + latSpan, z);
+    y1 = lat2ty(lat - latSpan, z);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) <= 16 || z <= 4) break;
+    z--;
+  }
+  const sig = `${z}/${x0}-${x1}/${y0}-${y1}`;
+  const now = Date.now();
+  if (!force && sig === wx.sig && now - wx.lastFetch < 300000) return;
+  wx.fetching = true;
+  try {
+    const tiles = [];
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const url = await invoke("get_wx_tile", { z, x, y });
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+        tiles.push({ img, n: tile2lat(y, z), s: tile2lat(y + 1, z), w: tile2lon(x, z), e: tile2lon(x + 1, z) });
+      }
+    }
+    wx.tiles = tiles;
+    wx.sig = sig;
+    wx.lastFetch = now;
+  } catch {
+    // tile hiccup: keep the previous frame, retry next cycle
+  } finally {
+    wx.fetching = false;
+  }
+}
+setInterval(() => wxRefresh(false), 60000);
+
+document.getElementById("wx-toggle").addEventListener("click", () => {
+  wx.on = !wx.on;
+  document.getElementById("wx-toggle").classList.toggle("latched", wx.on);
+  if (wx.on) {
+    wx.sig = ""; // force re-fetch for current view
+    wxRefresh(true);
+  } else {
+    wx.tiles = [];
+  }
+  if (cfg) {
+    cfg.wx_enabled = wx.on;
+    invoke("set_config", { newCfg: cfg }).catch(() => {});
+  }
+});
+
 // ————— zoom —————
 function setZoomIdx(idx) {
   const steps = cfg.zoom_steps_km;
@@ -331,6 +456,7 @@ function setZoomIdx(idx) {
   zoomKm = steps[i];
   document.getElementById("zoom-label").textContent =
     zoomKm >= 100 ? Math.round(zoomKm) + " KM" : zoomKm + " KM";
+  wxRefresh(true);
 }
 function zoomIdx() {
   let best = 0, bd = Infinity;
@@ -544,21 +670,17 @@ listen("radar:update", ev => {
   snapshot = ev.payload;
   lastRx = Date.now();
   lastError = null;
-  const now = Date.now();
+  // Fresh data feeds the paint pass; the DRAWN state only changes when the
+  // sweep passes each contact (see the PPI block in draw()).
+  latestByHex = new Map();
   for (const a of snapshot.ac) {
     if (a.lat == null || a.lon == null) continue;
-    let t = trails.get(a.hex);
-    if (!t) { t = []; trails.set(a.hex, t); }
-    const last = t[t.length - 1];
-    if (!last || last.lat !== a.lat || last.lon !== a.lon) {
-      t.push({ lat: a.lat, lon: a.lon, t: now });
-      if (t.length > 40) t.shift();
-    }
+    latestByHex.set(a.hex, a);
   }
   // expire trails of contacts gone > 5 min
-  const liveHex = new Set(snapshot.ac.map(a => a.hex));
+  const now = Date.now();
   for (const [hex, t] of trails) {
-    if (!liveHex.has(hex) && now - t[t.length - 1].t > 300000) trails.delete(hex);
+    if (!latestByHex.has(hex) && now - t[t.length - 1].t > 300000) trails.delete(hex);
   }
   document.getElementById("lcd-feed").textContent = "FEED " + snapshot.feed.toUpperCase();
   document.getElementById("lcd-count").textContent = snapshot.ac.length + " AC";
@@ -590,6 +712,10 @@ listen("radar:focus", ev => {
 (async function init() {
   cfg = await invoke("get_config");
   zoomKm = cfg.default_zoom_km;
+  // valid projection center before the first poll lands
+  snapshot.home = { lat: cfg.home_lat, lon: cfg.home_lon };
+  wx.on = !!cfg.wx_enabled;
+  document.getElementById("wx-toggle").classList.toggle("latched", wx.on);
   setZoomIdx(zoomIdx());
   sizeCanvas();
   requestAnimationFrame(draw);

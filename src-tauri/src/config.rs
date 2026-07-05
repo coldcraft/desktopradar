@@ -33,6 +33,8 @@ pub struct Config {
     pub zoom_steps_km: Vec<f64>,
     pub emergency_squawks: Vec<String>,
     pub toast_sound: bool,
+    /// NEXRAD weather underlay on the disc.
+    pub wx_enabled: bool,
     /// "auto" (WorkerW, fall back to bottom) | "workerw" | "bottom" | "normal"
     pub desktop_mode: String,
     pub feeds: Vec<Feed>,
@@ -59,6 +61,7 @@ impl Default for Config {
             zoom_steps_km: vec![10.0, 20.0, 30.0, 50.0, 100.0, 185.0, 300.0, 463.0],
             emergency_squawks: vec!["7500".into(), "7600".into(), "7700".into()],
             toast_sound: false,
+            wx_enabled: false,
             desktop_mode: "auto".into(),
             feeds: vec![
                 Feed {

@@ -84,6 +84,18 @@ only after leaving it *and* the cooldown elapsing. Toasts are silent
 (`<audio silent="true"/>`). Clicking a toast raises the gadget and opens that
 aircraft's card.
 
+## The disc
+
+- **PPI paint**: a blip's drawn position refreshes only when the sweep
+  crosses its bearing — dots update under the beam, not in unison. Fresh
+  poll data waits invisibly until the beam comes around; contacts that stop
+  reporting ghost out over ~16 s of phosphor decay.
+- **Weather underlay (WX button)**: NEXRAD composite from the Iowa
+  Environmental Mesonet (free, no key), fetched in Rust as 5-minute-cached
+  tiles and returned to the webview as data URLs (no page HTTP, no canvas
+  taint), drawn dim beneath the grid so the phosphor look survives. The
+  toggle persists in config (`wx_enabled`).
+
 ## Window behavior
 
 `desktop_mode` in config:

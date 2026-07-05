@@ -93,6 +93,13 @@ html, body {
 .chrome-btn:hover { background: linear-gradient(#ffffff 0%, #e3e7ec 45%, #c4c9cf 50%, #dde2e7 100%); }
 .chrome-btn:active { background: linear-gradient(#b7bbc0, #d7dade); box-shadow: inset 0 1px 3px rgba(0,0,0,0.4); }
 .chrome-btn.wide { width: 100%; height: 28px; font-weight: 700; letter-spacing: 1px; }
+#wx-toggle { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+.chrome-btn.latched {
+  background: linear-gradient(#8fdcac 0%, #4fb377 50%, #6fca92 100%);
+  color: #0b3a1e;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), 0 0 6px rgba(80,220,140,0.5);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.35);
+}
 
 /* ————— the disc ————— */
 #disc-wrap { position: relative; display: flex; flex-direction: column; align-items: center; }

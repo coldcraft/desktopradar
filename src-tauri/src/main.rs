@@ -20,6 +20,8 @@ struct AppState {
     config: RwLock<Config>,
     client: FeedClient,
     routes: routes::RouteCache,
+    /// NEXRAD tile cache: (z, x, y, 5-min bucket) → data URL.
+    wx_tiles: Mutex<HashMap<(u32, u32, u32, u64), String>>,
     engine_interesting: Mutex<AlertEngine>,
     engine_emergency: Mutex<AlertEngine>,
     /// Hexes currently emergency-classified by poll A (local) and poll B
@@ -64,6 +66,49 @@ async fn get_route(
         }
         r
     }))
+}
+
+/// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
+/// data URL so the webview never does HTTP and the canvas never taints.
+/// Cached per 5-minute bucket, matching IEM's refresh cadence.
+#[tauri::command]
+async fn get_wx_tile(
+    z: u32,
+    x: u32,
+    y: u32,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let bucket = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs()
+        / 300;
+    let key = (z, x, y, bucket);
+    if let Some(hit) = state.wx_tiles.lock().unwrap().get(&key) {
+        return Ok(hit.clone());
+    }
+    let url = format!(
+        "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png"
+    );
+    let resp = state
+        .client
+        .http()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("wx http {}", resp.status().as_u16()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let data_url = format!("data:image/png;base64,{}", STANDARD.encode(&bytes));
+    {
+        let mut cache = state.wx_tiles.lock().unwrap();
+        cache.retain(|k, _| k.3 == bucket); // drop stale buckets
+        cache.insert(key, data_url.clone());
+    }
+    Ok(data_url)
 }
 
 #[tauri::command]
@@ -353,6 +398,7 @@ fn main() {
             config: RwLock::new(config::load()),
             client: FeedClient::new(),
             routes: routes::RouteCache::new(),
+            wx_tiles: Mutex::new(HashMap::new()),
             engine_interesting: Mutex::new(AlertEngine::new()),
             engine_emergency: Mutex::new(AlertEngine::new()),
             emerg_local: Mutex::new(HashSet::new()),
@@ -363,6 +409,7 @@ fn main() {
             get_config,
             set_config,
             get_route,
+            get_wx_tile,
             set_activatable
         ])
         .setup(|app| {
