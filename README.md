@@ -10,6 +10,21 @@ failover, route caching, and edge-triggered alert state live in one place.
 
 ![the gadget](docs/screenshot.png)
 
+## Download (no tools needed)
+
+Grab the latest installer from
+[**Releases**](https://github.com/coldcraft/desktopradar/releases):
+
+- **Windows**: run the `*-setup.exe`. SmartScreen warns because the app
+  isn't code-signed — click **More info → Run anyway**. WebView2 installs
+  automatically if missing.
+- **macOS**: open the `.dmg`, drag ADS-B Radar to Applications. First launch
+  is blocked (unsigned): **System Settings → Privacy & Security → Open
+  Anyway**.
+
+First run: click the gear (⚙) and set your home latitude/longitude — the
+disc centers on it and "overhead" alerts key off it.
+
 ## Build & run
 
 Prereqs: Rust (MSVC toolchain) + VS Build Tools C++ workload + WebView2

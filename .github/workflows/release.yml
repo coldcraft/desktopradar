@@ -1,0 +1,56 @@
+name: release
+
+# Tag a version (git tag v0.1.0 && git push --tags) and this builds
+# double-clickable installers for Windows + macOS and attaches them to a
+# GitHub Release. No signing certs, so both OSes show an "unidentified
+# developer" hurdle — the release body carries the click-through steps.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: --bundles nsis
+          - platform: macos-latest
+            args: --bundles dmg --target universal-apple-darwin
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "ADS-B Radar ${{ github.ref_name }}"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+          releaseBody: |
+            Desktop ADS-B radar gadget. Shows live aircraft around your home
+            with silent toasts for interesting/emergency traffic.
+
+            **Windows:** download the `*-setup.exe` and run it. SmartScreen
+            will warn because the app isn't code-signed — click
+            **More info → Run anyway**. WebView2 installs automatically if
+            missing.
+
+            **macOS:** download the `.dmg`, drag ADS-B Radar to Applications.
+            First launch is blocked (unsigned app): open
+            **System Settings → Privacy & Security**, scroll down, click
+            **Open Anyway**.
+
+            First run: click the gear and set your home latitude/longitude.

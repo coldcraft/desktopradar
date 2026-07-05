@@ -621,6 +621,7 @@ function closeSettings() {
 }
 S("btn-settings").addEventListener("click", openSettings);
 S("settings-close").addEventListener("click", closeSettings);
+S("settings-test").addEventListener("click", () => invoke("test_toast").catch(() => {}));
 
 S("settings-save").addEventListener("click", async () => {
   const msg = S("settings-msg");

@@ -68,6 +68,34 @@ async fn get_route(
     }))
 }
 
+/// Fires a fake interesting-traffic toast so users can confirm notifications
+/// work (and look right) without waiting for real traffic.
+#[tauri::command]
+fn test_toast(app: AppHandle) {
+    #[cfg(windows)]
+    {
+        use tauri_winrt_notification::{Duration as ToastDuration, Toast};
+        let r = Toast::new(AUMID)
+            .title("✈ Test contact")
+            .text1("RADAR1 · B738 · 2,500 ft · 1 km N — toasts are working")
+            .duration(ToastDuration::Short)
+            .sound(None)
+            .show();
+        if let Err(e) = r {
+            eprintln!("test toast failed: {e:?}");
+        }
+    }
+    let _ = app.emit(
+        "radar:toast",
+        serde_json::json!({
+            "class": "interesting",
+            "title": "✈ Test contact",
+            "body": "RADAR1 · B738 · 2,500 ft · 1 km N — toasts are working",
+            "hex": "test",
+        }),
+    );
+}
+
 /// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
 /// data URL so the webview never does HTTP and the canvas never taints.
 /// Cached per 5-minute bucket, matching IEM's refresh cadence.
@@ -126,6 +154,43 @@ fn set_activatable(on: bool, window: tauri::WebviewWindow, state: tauri::State<'
     }
     #[cfg(not(windows))]
     let _ = (on, window);
+}
+
+/// Toast identity. Unpackaged/NSIS apps need an AppUserModelID registered in
+/// HKCU (display name + icon) for toasts to show branded — otherwise the
+/// fallback is PowerShell's AUMID, which brands toasts "Windows PowerShell"
+/// and can spawn an empty PowerShell console when one is clicked.
+#[cfg(windows)]
+const AUMID: &str = "com.shavlik.adsbradar";
+
+#[cfg(windows)]
+fn register_aumid() -> Result<(), String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    // Icon shown on the toast: materialize the embedded .ico next to config.
+    let icon_path = config::config_path()
+        .parent()
+        .map(|d| d.join("icon.ico"))
+        .ok_or("no config dir")?;
+    let icon_bytes: &[u8] = include_bytes!("../icons/icon.ico");
+    let needs_write = std::fs::metadata(&icon_path)
+        .map(|m| m.len() != icon_bytes.len() as u64)
+        .unwrap_or(true);
+    if needs_write {
+        if let Some(dir) = icon_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&icon_path, icon_bytes).map_err(|e| e.to_string())?;
+    }
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu
+        .create_subkey(format!("Software\\Classes\\AppUserModelId\\{AUMID}"))
+        .map_err(|e| e.to_string())?;
+    key.set_value("DisplayName", &"ADS-B Radar")
+        .map_err(|e| e.to_string())?;
+    key.set_value("IconUri", &icon_path.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn fmt_alt(a: &UiAircraft) -> String {
@@ -215,7 +280,7 @@ fn send_toast(app: &AppHandle, class: AlertClass, a: &UiAircraft, feed: &str) {
             .toast_sound;
         let app2 = app.clone();
         let hex = a.hex.clone();
-        let mut toast = Toast::new(Toast::POWERSHELL_APP_ID)
+        let mut toast = Toast::new(AUMID)
             .title(&title)
             .text1(&body)
             .duration(ToastDuration::Short);
@@ -410,6 +475,7 @@ fn main() {
             set_config,
             get_route,
             get_wx_tile,
+            test_toast,
             set_activatable
         ])
         .setup(|app| {
@@ -417,6 +483,9 @@ fn main() {
 
             #[cfg(windows)]
             {
+                if let Err(e) = register_aumid() {
+                    eprintln!("AUMID registration failed ({e}); toasts may not show");
+                }
                 let win = app.get_webview_window("main").expect("main window");
                 let mode_cfg = handle
                     .state::<AppState>()
