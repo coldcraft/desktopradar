@@ -1,0 +1,12 @@
+{
+  "identifier": "main-capability",
+  "description": "Permissions for the radar gadget window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-start-dragging"
+  ]
+}

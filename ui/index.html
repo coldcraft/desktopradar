@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ADS-B Radar</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="gadget">
+    <div id="screw-tl" class="screw"></div>
+    <div id="screw-tr" class="screw"></div>
+    <div id="screw-bl" class="screw"></div>
+    <div id="screw-br" class="screw"></div>
+
+    <div id="header" data-tauri-drag-region>
+      <div id="led" class="led-ok" title="feed status"></div>
+      <div id="title" data-tauri-drag-region>ADS-B RADAR</div>
+      <button id="btn-settings" class="chrome-btn" title="Settings">⚙</button>
+      <button id="btn-close" class="chrome-btn" title="Close">✕</button>
+    </div>
+
+    <div id="disc-wrap">
+      <div id="bezel">
+        <div id="phosphor">
+          <canvas id="radar"></canvas>
+          <div id="glass"></div>
+        </div>
+      </div>
+      <div id="zoom">
+        <button id="zoom-out" class="chrome-btn" title="Zoom out">−</button>
+        <div id="zoom-label" class="lcd-text">30 KM</div>
+        <button id="zoom-in" class="chrome-btn" title="Zoom in">+</button>
+      </div>
+    </div>
+
+    <div id="lcd" class="lcd-text">
+      <span id="lcd-feed">FEED --</span>
+      <span id="lcd-count">0 AC</span>
+      <span id="lcd-age">UPD --</span>
+    </div>
+
+    <div id="events">
+      <div id="events-title">CONTACTS <span id="events-sub">interesting &amp; emergency</span></div>
+      <ul id="event-list"><li class="ev-empty">nothing interesting aloft</li></ul>
+    </div>
+
+    <div id="attrib">data © <span>adsb.lol</span> · <a id="fi-link">adsb.fi</a> · <span>airplanes.live</span> (ODbL)</div>
+
+    <div id="tooltip" class="hidden"></div>
+
+    <div id="card" class="panel hidden">
+      <div class="panel-head">
+        <span id="card-callsign">—</span>
+        <button id="card-close" class="chrome-btn">✕</button>
+      </div>
+      <div id="card-body"></div>
+    </div>
+
+    <div id="settings" class="panel hidden">
+      <div class="panel-head">
+        <span>SETTINGS</span>
+        <button id="settings-close" class="chrome-btn">✕</button>
+      </div>
+      <div id="settings-body">
+        <fieldset><legend>Home</legend>
+          <label>Latitude <input id="s-lat" type="number" step="0.0001"></label>
+          <label>Longitude <input id="s-lon" type="number" step="0.0001"></label>
+        </fieldset>
+        <fieldset><legend>Overhead</legend>
+          <label>Radius km <input id="s-ohr" type="number" step="0.5" min="0.5"></label>
+          <label>Ceiling ft <input id="s-ohc" type="number" step="500" min="0"></label>
+        </fieldset>
+        <fieldset><legend>Regional</legend>
+          <label>Radius NM (≤250) <input id="s-reg" type="number" step="5" min="5" max="250"></label>
+          <label>Watchlist (types / callsign prefixes, comma)
+            <input id="s-watch" type="text" placeholder="K35R, C130, RCH">
+          </label>
+        </fieldset>
+        <fieldset><legend>Polling &amp; alerts</legend>
+          <label>Local poll s <input id="s-pla" type="number" min="2" max="300"></label>
+          <label>Squawk sweep s <input id="s-plb" type="number" min="15" max="600"></label>
+          <label>Alert cooldown s <input id="s-cool" type="number" min="0"></label>
+          <label>Emergency squawks <input id="s-sqk" type="text" placeholder="7500,7600,7700"></label>
+          <label class="check"><input id="s-sound" type="checkbox"> Toast sound (default off)</label>
+        </fieldset>
+        <fieldset><legend>Disc</legend>
+          <label>Default zoom km <input id="s-zoom" type="number" min="1"></label>
+          <label>Zoom steps km <input id="s-steps" type="text" placeholder="10,20,30,50,100"></label>
+        </fieldset>
+        <fieldset><legend>Window (applies on restart)</legend>
+          <label>Desktop mode
+            <select id="s-mode">
+              <option value="auto">auto (WorkerW → bottom)</option>
+              <option value="workerw">workerw</option>
+              <option value="bottom">bottom-most</option>
+              <option value="normal">normal window</option>
+            </select>
+          </label>
+          <div id="s-mode-now" class="hint"></div>
+        </fieldset>
+        <fieldset><legend>Feeds (order = failover order)</legend>
+          <textarea id="s-feeds" rows="6" spellcheck="false"></textarea>
+        </fieldset>
+        <div id="settings-msg"></div>
+        <button id="settings-save" class="chrome-btn wide">SAVE — applies live</button>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

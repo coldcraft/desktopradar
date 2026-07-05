@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ADS-B Radar",
+  "version": "0.1.0",
+  "identifier": "com.shavlik.adsbradar",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "ADS-B Radar",
+        "width": 460,
+        "height": 680,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
