@@ -106,7 +106,14 @@ pub fn classify(ac: &Aircraft, cfg: &Config) -> UiAircraft {
         if w.is_empty() {
             continue;
         }
-        if type_u == w || (!flight_u.is_empty() && flight_u.starts_with(&w)) {
+        // "RCH*" = callsign prefix; anything else = exact ICAO type code.
+        // (Bare prefix matching once toasted a C-17 alert for "C174" — an
+        // O'Hare follow-me truck.)
+        let hit = match w.strip_suffix('*') {
+            Some(prefix) => !prefix.is_empty() && flight_u.starts_with(prefix),
+            None => type_u == w,
+        };
+        if hit {
             interesting = true;
             reasons.push(format!("watchlist:{w}"));
             break;
@@ -127,6 +134,19 @@ pub fn classify(ac: &Aircraft, cfg: &Config) -> UiAircraft {
             }
             is_emergency = true;
         }
+    }
+
+    // Emitter category C1–C5 = surface vehicles and fixed obstructions.
+    // They broadcast ADS-B but they are not aircraft: never alertable.
+    let mut overhead = overhead;
+    if matches!(
+        ac.category.as_deref(),
+        Some("C1") | Some("C2") | Some("C3") | Some("C4") | Some("C5")
+    ) {
+        overhead = false;
+        interesting = false;
+        is_emergency = false;
+        reasons = vec!["surface-vehicle".into()];
     }
 
     UiAircraft {

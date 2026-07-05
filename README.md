@@ -70,8 +70,13 @@ The gadget shows this in its footer.
 - `emergency`: DO-260B priority status (superset of the 7×00 squawks) — read
   directly; squawk-list matching is the backup.
 - **Overhead** = within overhead radius, below the altitude ceiling, not on ground.
-- **Regional-interesting** = mil / db-interesting / `B2` balloon / watchlist
-  (exact ICAO type or callsign prefix).
+- **Regional-interesting** = mil / db-interesting / `B2` balloon / watchlist.
+  Watchlist entries match ICAO type codes exactly; suffix `*` for a callsign
+  prefix (`RCH*`). Bare prefix matching is deliberately off — a `C17` entry
+  once flagged "C174", which turned out to be an O'Hare follow-me truck.
+- Emitter category `C1`–`C5` (surface vehicles, fixed obstructions) is
+  excluded from every alert class — they broadcast ADS-B but aren't aircraft.
+  They still draw on the disc, labeled as vehicles.
 - **Emergency** = non-`none` emergency field or listed squawk, local or global.
 
 Alerts are **edge-triggered per hex**: fire once on entering a class, re-arm

@@ -54,8 +54,13 @@ function vsArrow(rate) {
   if (rate == null || Math.abs(rate) < 100) return "";
   return rate > 0 ? " ▲" : " ▼";
 }
+const SURFACE_CATS = { C1: "surface vehicle (emergency)", C2: "surface vehicle (service)", C3: "obstruction", C4: "obstruction", C5: "obstruction" };
+function typeLabel(ac) {
+  return ac.t || SURFACE_CATS[ac.category] || "";
+}
 function reasonLabel(ac) {
   for (const r of ac.reasons || []) {
+    if (r === "surface-vehicle") return "vehicle";
     if (r.startsWith("emergency:")) return r.slice(10).toUpperCase();
     if (r.startsWith("squawk:")) return "SQK " + r.slice(7);
     if (r === "military") return "military";
@@ -284,7 +289,7 @@ function renderTooltip(a) {
     : "";
   tooltip.innerHTML =
     `<div class="tt-cs">${callsignOf(a)}</div>` +
-    `${a.t || ""} ${a.desc ? "· " + a.desc : ""}<br>` +
+    `${typeLabel(a)} ${a.desc ? "· " + a.desc : ""}<br>` +
     routeHtml +
     `${fmtAltAc(a)}${vsArrow(a.baro_rate)} · ${a.gs != null ? Math.round(a.gs) + " kt" : "spd ?"}<br>` +
     `${a.dst_km != null ? a.dst_km.toFixed(1) + " km " + compass(a.bearing || 0) : ""}` +
@@ -362,7 +367,7 @@ async function openCard(hex) {
   }
   document.getElementById("card-callsign").textContent = callsignOf(a);
   const rows = [
-    ["Type", `${a.t || "?"}${a.desc ? " — " + a.desc : ""}`],
+    ["Type", `${typeLabel(a) || "?"}${a.desc ? " — " + a.desc : ""}`],
     ["Registration", a.reg || "—"],
     ["Altitude", a.alt_baro === "ground" && a.airport
       ? `on ground @ ${a.airport_name || ""} (${a.airport})`.replace("  ", " ")
