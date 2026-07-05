@@ -69,9 +69,9 @@ async fn get_route(
 }
 
 /// Fires a fake interesting-traffic toast so users can confirm notifications
-/// work (and look right) without waiting for real traffic.
-#[tauri::command]
-fn test_toast(app: AppHandle) {
+/// work (and look right) without waiting for real traffic. Reached from both
+/// the settings panel and the tray menu.
+fn send_test_toast(app: &AppHandle) {
     #[cfg(windows)]
     {
         use tauri_winrt_notification::{Duration as ToastDuration, Toast};
@@ -94,6 +94,11 @@ fn test_toast(app: AppHandle) {
             "hex": "test",
         }),
     );
+}
+
+#[tauri::command]
+fn test_toast(app: AppHandle) {
+    send_test_toast(&app);
 }
 
 /// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
@@ -288,10 +293,13 @@ fn send_toast(app: &AppHandle, class: AlertClass, a: &UiAircraft, feed: &str) {
             toast = toast.sound(None); // silent by requirement
         }
         let toast = toast.on_activated(move |_arg| {
-            // Click focuses/raises the gadget on that aircraft's card.
+            // Click peeks the gadget (it lives on the desktop layer, so a
+            // plain raise can't bring it forward) and opens the card.
             if let Some(w) = app2.get_webview_window("main") {
                 let _ = w.show();
-                let _ = w.set_focus();
+                if let Ok(h) = w.hwnd() {
+                    desktop::peek(h.0 as isize, 8);
+                }
             }
             let _ = app2.emit("radar:focus", hex.clone());
             Ok(())
@@ -457,8 +465,68 @@ async fn poll_squawks(app: AppHandle) {
     }
 }
 
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::TrayIconBuilder;
+    use tauri_plugin_autostart::ManagerExt;
+
+    let peek = MenuItem::with_id(app, "peek", "Peek at radar", true, None::<&str>)?;
+    let test = MenuItem::with_id(app, "test", "Test silent toast", true, None::<&str>)?;
+    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let autostart =
+        CheckMenuItem::with_id(app, "autostart", "Start with Windows", true, autostart_on, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &peek,
+            &test,
+            &PredefinedMenuItem::separator(app)?,
+            &autostart,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+
+    let autostart_item = autostart.clone();
+    TrayIconBuilder::with_id("main-tray")
+        .icon(app.default_window_icon().expect("window icon").clone())
+        .tooltip("ADS-B Radar")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(move |app, event| match event.id.as_ref() {
+            "peek" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    #[cfg(windows)]
+                    if let Ok(h) = w.hwnd() {
+                        desktop::peek(h.0 as isize, 6);
+                    }
+                }
+            }
+            "test" => send_test_toast(app),
+            "autostart" => {
+                let al = app.autolaunch();
+                let now_on = al.is_enabled().unwrap_or(false);
+                let r = if now_on { al.disable() } else { al.enable() };
+                if let Err(e) = r {
+                    eprintln!("autostart toggle failed: {e}");
+                }
+                let _ = autostart_item.set_checked(al.is_enabled().unwrap_or(false));
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState {
             config: RwLock::new(config::load()),
             client: FeedClient::new(),
@@ -480,6 +548,8 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+
+            build_tray(app)?;
 
             #[cfg(windows)]
             {

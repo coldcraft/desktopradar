@@ -20,8 +20,8 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, FindWindowW, GetClassNameW, GetParent, GetWindowLongPtrW,
     SendMessageTimeoutW, SetParent, SetWindowLongPtrW, SetWindowPos, GWLP_HWNDPARENT,
-    GWL_EXSTYLE, HWND_BOTTOM, SMTO_NORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, SMTO_NORMAL, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 fn wide(s: &str) -> Vec<u16> {
@@ -154,6 +154,38 @@ pub fn pin_bottom(raw_hwnd: isize) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
     }
+}
+
+/// The gadget lives on the desktop layer, so "show it" can't mean "raise
+/// it". Peek pops it topmost for a few seconds — long enough to read the
+/// scope — then sinks it back to the gadget slot.
+pub fn peek(raw_hwnd: isize, secs: u64) {
+    unsafe {
+        SetWindowPos(
+            raw_hwnd as HWND,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        unsafe {
+            SetWindowPos(
+                raw_hwnd as HWND,
+                HWND_NOTOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+        pin_bottom(raw_hwnd);
+    });
 }
 
 /// WS_EX_NOACTIVATE blocks keyboard focus, which breaks typing into the
