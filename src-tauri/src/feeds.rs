@@ -120,10 +120,13 @@ impl FeedClient {
         Err(last_err)
     }
 
-    pub async fn point(&self, cfg: &Config) -> Result<(String, FeedResponse), String> {
+    /// `radius_nm` is the effective query radius — the poller widens it to
+    /// cover the current disc zoom so far-out traffic actually has data,
+    /// capped at the feeds' 250 NM ceiling.
+    pub async fn point(&self, cfg: &Config, radius_nm: f64) -> Result<(String, FeedResponse), String> {
         let lat = format!("{:.4}", cfg.home_lat);
         let lon = format!("{:.4}", cfg.home_lon);
-        let nm = format!("{:.0}", cfg.regional_radius_nm.clamp(1.0, 250.0));
+        let nm = format!("{:.0}", radius_nm.clamp(1.0, 250.0));
         self.with_failover(cfg, |f| {
             f.point_url
                 .replace("{lat}", &lat)

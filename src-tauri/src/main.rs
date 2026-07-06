@@ -6,11 +6,14 @@ mod config;
 #[cfg(windows)]
 mod desktop;
 mod feeds;
+mod operators;
 mod routes;
+mod store;
 
 use classify::{classify, compass, AlertClass, AlertEngine, UiAircraft};
 use config::Config;
 use feeds::FeedClient;
+use store::Store;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, RwLock};
 use std::time::Duration;
@@ -19,6 +22,11 @@ use tauri::{AppHandle, Emitter, Manager};
 struct AppState {
     config: RwLock<Config>,
     client: FeedClient,
+    /// Append-only sightings log + dex. Passive polls fill it; Catch stamps it.
+    store: Store,
+    /// Freshest UiAircraft by hex from the last local poll, so a Catch click
+    /// can persist full contact detail even between polls.
+    latest_ac: Mutex<HashMap<String, UiAircraft>>,
     routes: routes::RouteCache,
     /// NEXRAD tile cache: (z, x, y, 5-min bucket) → data URL.
     wx_tiles: Mutex<HashMap<(u32, u32, u32, u64), String>>,
@@ -30,11 +38,21 @@ struct AppState {
     emerg_local: Mutex<HashSet<String>>,
     emerg_global: Mutex<HashSet<String>>,
     attach_mode: Mutex<String>,
+    /// Current disc zoom (km) reported by the UI; the point poll widens to
+    /// cover it so zooming out actually reveals distant traffic.
+    view_radius_km: Mutex<f64>,
 }
 
 #[tauri::command]
 fn get_config(state: tauri::State<'_, AppState>) -> Config {
     state.config.read().unwrap().clone()
+}
+
+/// The UI reports its current disc zoom so the point poll can widen to cover
+/// what's visible (capped at 250 NM in the feed layer).
+#[tauri::command]
+fn set_view_radius(km: f64, state: tauri::State<'_, AppState>) {
+    *state.view_radius_km.lock().unwrap() = km.max(0.0);
 }
 
 #[tauri::command]
@@ -119,6 +137,35 @@ fn open_globe(hex: String) -> Result<String, String> {
     // opener uses ShellExecuteW on Windows — no console flash.
     opener::open_browser(&url).map_err(|e| e.to_string())?;
     Ok(url)
+}
+
+/// Promote a live contact into the dex: record its latest detail (so the row
+/// is complete even if caught seconds after first appearing) then stamp
+/// caught_at. Returns true when this click is what caught it.
+#[tauri::command]
+fn catch_contact(hex: String, state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    if let Some(a) = state.latest_ac.lock().unwrap().get(&hex).cloned() {
+        state.store.record(&a);
+    }
+    state.store.catch(&hex)
+}
+
+/// Hexes already caught, so the Contacts drawer can mark them.
+#[tauri::command]
+fn dex_hexes(state: tauri::State<'_, AppState>) -> Vec<String> {
+    state.store.caught_hexes()
+}
+
+/// The full dex: every caught airframe, newest first, for the Dex drawer.
+#[tauri::command]
+fn dex(state: tauri::State<'_, AppState>) -> Vec<store::DexEntry> {
+    state.store.dex()
+}
+
+/// Collection stats + personal achievements for the Milestones drawer.
+#[tauri::command]
+fn milestones(state: tauri::State<'_, AppState>) -> store::Milestones {
+    state.store.milestones()
 }
 
 /// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
@@ -337,7 +384,11 @@ async fn poll_local(app: AppHandle) {
         let cfg = app.state::<AppState>().config.read().unwrap().clone();
         let result = {
             let state = app.state::<AppState>();
-            state.client.point(&cfg).await
+            // Cover the configured regional radius OR the current disc zoom,
+            // whichever is larger, so zooming out reveals distant traffic.
+            let view_nm = *state.view_radius_km.lock().unwrap() / 1.852;
+            let eff_nm = cfg.regional_radius_nm.max(view_nm);
+            state.client.point(&cfg, eff_nm).await
         };
         match result {
             Ok((feed, resp)) => {
@@ -353,6 +404,19 @@ async fn poll_local(app: AppHandle) {
                         .partial_cmp(&b.dst_km.unwrap_or(f64::MAX))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
+
+                // Passive log: the antenna hears everything, so every contact
+                // gets an append-only row. Refresh the by-hex map so a Catch
+                // click can persist full detail between polls.
+                {
+                    let state = app.state::<AppState>();
+                    state.store.record_batch(ac.iter());
+                    let mut latest = state.latest_ac.lock().unwrap();
+                    latest.clear();
+                    for a in &ac {
+                        latest.insert(a.hex.clone(), a.clone());
+                    }
+                }
 
                 let cooldown = Duration::from_secs(cfg.alert_cooldown_secs);
                 let mut fire: Vec<(AlertClass, UiAircraft)> = Vec::new();
@@ -459,6 +523,17 @@ async fn poll_squawks(app: AppHandle) {
             tokio::time::sleep(stagger).await;
         }
 
+        // Log the global emergency hits and keep them catchable from the
+        // Contacts drawer even when they're outside the local disc.
+        {
+            let state = app.state::<AppState>();
+            state.store.record_batch(hits.values());
+            let mut latest = state.latest_ac.lock().unwrap();
+            for (hex, u) in &hits {
+                latest.insert(hex.clone(), u.clone());
+            }
+        }
+
         let cooldown = Duration::from_secs(cfg.alert_cooldown_secs);
         let mut fire: Vec<UiAircraft> = Vec::new();
         {
@@ -550,6 +625,8 @@ fn main() {
         .manage(AppState {
             config: RwLock::new(config::load()),
             client: FeedClient::new(),
+            store: Store::open(),
+            latest_ac: Mutex::new(HashMap::new()),
             routes: routes::RouteCache::new(),
             wx_tiles: Mutex::new(HashMap::new()),
             engine_interesting: Mutex::new(AlertEngine::new()),
@@ -557,6 +634,7 @@ fn main() {
             emerg_local: Mutex::new(HashSet::new()),
             emerg_global: Mutex::new(HashSet::new()),
             attach_mode: Mutex::new("normal".into()),
+            view_radius_km: Mutex::new(0.0),
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
@@ -565,6 +643,11 @@ fn main() {
             get_wx_tile,
             test_toast,
             open_globe,
+            catch_contact,
+            dex_hexes,
+            dex,
+            milestones,
+            set_view_radius,
             set_activatable
         ])
         .setup(|app| {

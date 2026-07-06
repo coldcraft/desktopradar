@@ -39,6 +39,8 @@ pub struct UiAircraft {
     pub hex: String,
     pub flight: Option<String>,
     pub reg: Option<String>,
+    /// Airline / military command derived from the callsign, when recognizable.
+    pub operator: Option<String>,
     pub t: Option<String>,
     pub desc: Option<String>,
     pub lat: Option<f64>,
@@ -153,6 +155,7 @@ pub fn classify(ac: &Aircraft, cfg: &Config) -> UiAircraft {
         hex: ac.hex.clone(),
         flight: ac.flight.as_ref().map(|f| f.trim().to_string()),
         reg: ac.r.clone(),
+        operator: crate::operators::operator_for(ac.flight.as_deref(), flags & 1 != 0),
         t: ac.t.clone(),
         desc: ac.desc.clone(),
         lat: ac.lat,

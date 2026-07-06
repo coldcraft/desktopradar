@@ -20,6 +20,17 @@ let painted = new Map(); // hex -> { ac, t } — snapshot taken as the beam pass
 let prevSweep = 0;
 const SWEEP_MS = 4000;
 const TAU = Math.PI * 2;
+// Altitude band filter (display only). ceiling === ALT_MAX means "and above".
+const ALT_MAX = 50000;
+const altFilter = { on: false, floor: 0, ceiling: ALT_MAX };
+function altPass(ac) {
+  if (!altFilter.on) return true;
+  const a = ac.alt_baro === "ground" ? 0 : (typeof ac.alt_baro === "number" ? ac.alt_baro : null);
+  if (a == null) return true; // unknown altitude: never hide
+  if (a < altFilter.floor) return false;
+  if (altFilter.ceiling < ALT_MAX && a > altFilter.ceiling) return false;
+  return true;
+}
 let hoverHex = null;
 let highlightHex = null;
 let cardHex = null;
@@ -221,6 +232,7 @@ function draw(tms) {
       continue;
     }
     if (p.ac.dst_km == null || p.ac.dst_km > zoomKm * 1.06) continue;
+    if (!altPass(p.ac)) continue;
     visible.push({ ac: p.ac, live, age });
   }
   const drawLabels = visible.length <= 18;
@@ -449,6 +461,46 @@ document.getElementById("wx-toggle").addEventListener("click", () => {
   }
 });
 
+// ————— altitude band filter —————
+function fmtFt(ft) {
+  if (ft <= 0) return "GND";
+  if (ft >= ALT_MAX) return "50k+";
+  return ft >= 1000 ? (ft / 1000) + "k" : ft + "";
+}
+function renderAltReadout() {
+  document.getElementById("alt-readout").textContent =
+    `${fmtFt(altFilter.floor)} – ${fmtFt(altFilter.ceiling)} ft`;
+}
+function persistAlt() {
+  if (!cfg) return;
+  cfg.alt_filter_on = altFilter.on;
+  cfg.alt_floor_ft = altFilter.floor;
+  cfg.alt_ceiling_ft = altFilter.ceiling;
+  invoke("set_config", { newCfg: cfg }).catch(() => {});
+}
+document.getElementById("alt-toggle").addEventListener("click", () => {
+  altFilter.on = !altFilter.on;
+  document.getElementById("alt-toggle").classList.toggle("latched", altFilter.on);
+  document.getElementById("alt-panel").classList.toggle("hidden", !altFilter.on);
+  persistAlt();
+});
+const floorEl = document.getElementById("alt-floor");
+const ceilEl = document.getElementById("alt-ceil");
+function onAltInput() {
+  let floor = +floorEl.value, ceil = +ceilEl.value;
+  if (floor > ceil) { // keep the thumbs from crossing
+    if (document.activeElement === floorEl) ceil = floor, ceilEl.value = ceil;
+    else floor = ceil, floorEl.value = floor;
+  }
+  altFilter.floor = floor;
+  altFilter.ceiling = ceil;
+  renderAltReadout();
+}
+floorEl.addEventListener("input", onAltInput);
+ceilEl.addEventListener("input", onAltInput);
+floorEl.addEventListener("change", persistAlt);
+ceilEl.addEventListener("change", persistAlt);
+
 // ————— zoom —————
 function setZoomIdx(idx) {
   const steps = cfg.zoom_steps_km;
@@ -456,6 +508,8 @@ function setZoomIdx(idx) {
   zoomKm = steps[i];
   document.getElementById("zoom-label").textContent =
     zoomKm >= 100 ? Math.round(zoomKm) + " KM" : zoomKm + " KM";
+  // tell Rust to widen the poll so this zoom has data out to its edge
+  invoke("set_view_radius", { km: zoomKm }).catch(() => {});
   wxRefresh(true);
 }
 function zoomIdx() {
@@ -494,6 +548,7 @@ async function openCard(hex) {
   document.getElementById("card-callsign").textContent = callsignOf(a);
   const rows = [
     ["Type", `${typeLabel(a) || "?"}${a.desc ? " — " + a.desc : ""}`],
+    ["Operator", a.operator || "—"],
     ["Registration", a.reg || "—"],
     ["Altitude", a.alt_baro === "ground" && a.airport
       ? `on ground @ ${a.airport_name || ""} (${a.airport})`.replace("  ", " ")
@@ -544,13 +599,111 @@ document.getElementById("card-globe").addEventListener("click", () => {
   if (cardHex) invoke("open_globe", { hex: cardHex }).catch(() => {});
 });
 
-// ————— contacts list —————
-function renderEvents() {
-  const ul = document.getElementById("event-list");
+// ————— drawers (Contacts / Dex / Milestones) —————
+// One append-only sightings table lives in Rust; each drawer is a view over
+// it. Passive polling fills the log; a Catch click promotes a contact into the
+// dex. Contacts renders live (this pass); Dex/Milestones land next.
+let activeDrawer = null;
+let caughtHexes = new Set(); // hexes already in the dex, from Rust
+
+function openDrawer(name) {
+  if (activeDrawer === name) { closeDrawer(); return; }
+  activeDrawer = name;
+  document.querySelectorAll(".rail-btn").forEach(b =>
+    b.classList.toggle("latched", b.dataset.drawer === name));
+  document.getElementById("drawer-title").textContent = name.toUpperCase();
+  document.getElementById("drawer").classList.add("open");
+  renderDrawer();
+}
+function closeDrawer() {
+  activeDrawer = null;
+  document.querySelectorAll(".rail-btn").forEach(b => b.classList.remove("latched"));
+  document.getElementById("drawer").classList.remove("open");
+}
+function renderDrawer() {
+  if (activeDrawer === "contacts") renderContacts();
+  else if (activeDrawer === "dex") renderDex();
+  else if (activeDrawer === "milestones") renderMilestones();
+}
+function renderPlaceholder(html) {
+  document.getElementById("drawer-body").innerHTML = `<div class="drawer-empty">${html}</div>`;
+}
+
+function relTime(sec) {
+  const d = Date.now() / 1000 - sec;
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+
+// Milestones: collection stats + personal achievements over the whole log.
+// Achievements against yourself — no leaderboard. Unlocked first (most recent
+// up top), then locked ones showing progress toward their target.
+async function renderMilestones() {
+  const body = document.getElementById("drawer-body");
+  let m;
+  try { m = await invoke("milestones"); } catch { renderPlaceholder("milestones unavailable"); return; }
+  if (activeDrawer !== "milestones") return;
+  const stat = (n, label) => `<div class="ms-stat"><span class="ms-num">${n}</span><span class="ms-lab">${label}</span></div>`;
+  const stats = `<div class="ms-stats">` +
+    stat(m.total_caught, "CAUGHT") + stat(m.distinct_types, "TYPES") +
+    stat(m.distinct_operators, "OPS") + stat(m.shinies, "★") +
+    stat(m.total_seen, "SEEN") + `</div>`;
+  const all = m.achievements || [];
+  const unlocked = all.filter((a) => a.unlocked).sort((x, y) => (y.at ?? 0) - (x.at ?? 0));
+  const locked = all.filter((a) => !a.unlocked);
+  const row = (a) => `<li class="ms-ach ${a.unlocked ? "unlocked" : "locked"}">` +
+    `<span class="ms-ico">${a.unlocked ? "★" : "○"}</span>` +
+    `<span class="ms-title">${a.title}</span>` +
+    `<span class="ms-note">${a.note}</span>` +
+    `<span class="ms-when">${a.unlocked && a.at ? relTime(a.at) : ""}</span></li>`;
+  body.innerHTML = stats + `<ul class="ms-list">` + [...unlocked, ...locked].map(row).join("") + `</ul>`;
+}
+
+// The dex: your caught airframes (caught_at IS NOT NULL), newest catch first.
+// One row per hex — the collection you deliberately claimed off the passive log.
+async function renderDex() {
+  const body = document.getElementById("drawer-body");
+  let entries;
+  try { entries = await invoke("dex"); } catch { renderPlaceholder("dex unavailable"); return; }
+  if (activeDrawer !== "dex") return; // user toggled away while the query ran
+  if (!entries.length) {
+    renderPlaceholder(`Your dex is empty.<br>Open <b>CONTACTS</b> and <b>catch</b> something.`);
+    return;
+  }
+  const types = new Set(entries.map(e => e.type_code).filter(Boolean));
+  const shinies = entries.filter(e => e.notable).length;
+  const stat = `${entries.length} CAUGHT · ${types.size} TYPE${types.size === 1 ? "" : "S"}` +
+    (shinies ? ` · ${shinies} ★` : "");
+  body.innerHTML = `<div class="dex-stat">${stat}</div><ul class="contact-list">` +
+    entries.map(e => {
+      const name = (e.callsign || "").trim() || e.registration || e.hex.toUpperCase();
+      const type = [e.type_code, e.type_desc].filter(Boolean).join(" · ");
+      const sub = [e.operator, type].filter(Boolean).join(" · ") || "—";
+      const badge = e.notable ? `<span class="dex-badge">${e.notable_reason || "NOTABLE"}</span>` : "";
+      const rar = e.rarity ? `<span class="rar rar-${e.rarity}">${e.rarity}</span>` : "";
+      const dot = e.rarity || (e.notable ? "legendary" : "common");
+      return `<li data-hex="${e.hex}">` +
+        `<span class="ev-dot rd-${dot}"></span>` +
+        `<span class="ev-cs">${name}</span>` +
+        `<span class="ev-why">${rar}${sub}${badge}</span>` +
+        `<span class="ev-where">${relTime(e.caught_at)}</span></li>`;
+    }).join("") + `</ul>`;
+  body.querySelectorAll("li[data-hex]").forEach(li =>
+    li.addEventListener("click", () => openCard(li.dataset.hex)));
+}
+
+// Live, unfiltered — every airframe the antenna hears, so common airliners are
+// catchable too (early dopamine), not just the interesting/emergency traffic.
+function renderContacts() {
+  const body = document.getElementById("drawer-body");
   const seen = new Set();
   const items = [];
-  for (const a of [...(snapshot.events || []), ...globalEmerg]) {
-    if (seen.has(a.hex)) continue;
+  for (const a of [...(snapshot.ac || []), ...globalEmerg]) {
+    if (!a.hex || seen.has(a.hex)) continue;
+    // surface vehicles broadcast ADS-B but aren't aircraft — not catchable
+    if ((a.reasons || []).includes("surface-vehicle")) continue;
     seen.add(a.hex);
     items.push(a);
   }
@@ -558,30 +711,52 @@ function renderEvents() {
     (y.is_emergency - x.is_emergency) ||
     ((x.dst_km ?? 1e9) - (y.dst_km ?? 1e9)));
   if (!items.length) {
-    ul.innerHTML = `<li class="ev-empty">nothing interesting aloft</li>`;
+    renderPlaceholder("nothing aloft");
     return;
   }
-  ul.innerHTML = items.map(a => {
-    const dot = a.is_emergency ? "emergency" : (a.interesting ? "interesting" : "overhead");
+  body.innerHTML = `<ul class="contact-list">` + items.map(a => {
+    const dot = a.is_emergency ? "emergency" : (a.interesting ? "interesting" : (a.overhead ? "overhead" : "plain"));
     const where = a.dst_km != null
       ? (a.dst_km > 999 ? Math.round(a.dst_km).toLocaleString() + " km" : a.dst_km.toFixed(0) + " km " + compass(a.bearing || 0))
       : "pos ?";
-    // route (when known) beats repeating the type code; AOG shows the field
     const aog = a.alt_baro === "ground" && a.airport ? "@ " + a.airport : null;
-    const detail = [routeTextFor(a), aog, a.t].filter(Boolean).slice(0, 2).join(" · ");
+    const detail = [a.operator, routeTextFor(a), aog, a.t].filter(Boolean).slice(0, 2).join(" · ");
+    const caught = caughtHexes.has(a.hex);
     return `<li data-hex="${a.hex}">` +
       `<span class="ev-dot ${dot}"></span>` +
       `<span class="ev-cs">${callsignOf(a)}</span>` +
-      `<span class="ev-why">${reasonLabel(a)}${detail ? " · " + detail : ""}</span>` +
-      `<span class="ev-where">${where}</span></li>`;
-  }).join("");
-  // warm route lookups for listed contacts; next render shows them
-  items.forEach(a => ensureRoute(a));
-  ul.querySelectorAll("li[data-hex]").forEach(li => {
+      `<span class="ev-why">${detail || reasonLabel(a) || ""}</span>` +
+      `<span class="ev-where">${where}</span>` +
+      `<button class="catch-btn ${caught ? "caught" : ""}" data-catch="${a.hex}">${caught ? "✓ GOT" : "CATCH"}</button>` +
+      `</li>`;
+  }).join("") + `</ul>`;
+  // warm routes only for notable traffic — warming all ~200 contacts would
+  // hammer adsbdb every poll; a plain airliner's route can wait for its card
+  items.filter(a => a.interesting || a.is_emergency).forEach(a => ensureRoute(a));
+  body.querySelectorAll("li[data-hex]").forEach(li => {
     li.addEventListener("click", () => openCard(li.dataset.hex));
     li.addEventListener("mouseenter", () => { highlightHex = li.dataset.hex; });
     li.addEventListener("mouseleave", () => { if (cardHex !== li.dataset.hex) highlightHex = cardHex; });
   });
+  body.querySelectorAll(".catch-btn").forEach(btn => {
+    btn.addEventListener("click", ev => {
+      ev.stopPropagation(); // don't open the card
+      doCatch(btn.dataset.catch, btn);
+    });
+  });
+}
+
+async function doCatch(hex, btn) {
+  if (caughtHexes.has(hex)) return;
+  try {
+    const newly = await invoke("catch_contact", { hex });
+    caughtHexes.add(hex);
+    btn.classList.add("caught");
+    btn.textContent = "✓ GOT";
+    if (newly) { btn.classList.add("flash"); btn.addEventListener("animationend", () => btn.classList.remove("flash"), { once: true }); }
+  } catch (e) {
+    // store unavailable — leave the button as-is so the user can retry
+  }
 }
 
 // ————— status LCD + LED —————
@@ -664,6 +839,11 @@ S("settings-save").addEventListener("click", async () => {
   }
 });
 
+// ————— drawer rail —————
+document.querySelectorAll(".rail-btn").forEach(b =>
+  b.addEventListener("click", () => openDrawer(b.dataset.drawer)));
+document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+
 // ————— window chrome —————
 document.getElementById("btn-close").addEventListener("click", () => {
   getCurrentWindow().close();
@@ -688,7 +868,7 @@ listen("radar:update", ev => {
   }
   document.getElementById("lcd-feed").textContent = "FEED " + snapshot.feed.toUpperCase();
   document.getElementById("lcd-count").textContent = snapshot.ac.length + " AC";
-  renderEvents();
+  if (activeDrawer === "contacts") renderContacts();
   if (cardHex && !document.getElementById("card").classList.contains("hidden")) {
     // live-refresh the open card without resetting the route line
     const a = findAc(cardHex);
@@ -701,7 +881,7 @@ listen("radar:update", ev => {
 
 listen("radar:emergencies", ev => {
   globalEmerg = ev.payload.ac || [];
-  renderEvents();
+  if (activeDrawer === "contacts") renderContacts();
 });
 
 listen("radar:error", ev => {
@@ -715,11 +895,21 @@ listen("radar:focus", ev => {
 // ————— boot —————
 (async function init() {
   cfg = await invoke("get_config");
+  try { caughtHexes = new Set(await invoke("dex_hexes")); } catch { /* store off */ }
   zoomKm = cfg.default_zoom_km;
   // valid projection center before the first poll lands
   snapshot.home = { lat: cfg.home_lat, lon: cfg.home_lon };
   wx.on = !!cfg.wx_enabled;
   document.getElementById("wx-toggle").classList.toggle("latched", wx.on);
+  // restore altitude filter
+  altFilter.on = !!cfg.alt_filter_on;
+  altFilter.floor = cfg.alt_floor_ft ?? 0;
+  altFilter.ceiling = cfg.alt_ceiling_ft ?? ALT_MAX;
+  floorEl.value = altFilter.floor;
+  ceilEl.value = altFilter.ceiling;
+  renderAltReadout();
+  document.getElementById("alt-toggle").classList.toggle("latched", altFilter.on);
+  document.getElementById("alt-panel").classList.toggle("hidden", !altFilter.on);
   setZoomIdx(zoomIdx());
   sizeCanvas();
   requestAnimationFrame(draw);

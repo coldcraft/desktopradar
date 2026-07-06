@@ -115,6 +115,18 @@ aircraft's card.
   escape hatch. The globe map is free to eyeball (only the API is paid).
   Works even after a contact fades from local scope, since the card keeps
   its hex.
+- **ALT (altitude band filter)**: dual slider (floor + ceiling) that hides
+  blips outside the band — declutter to just the high stuff, just the
+  low-and-close stuff, etc. Ceiling at max reads "50k+" (and above); ground
+  traffic counts as 0 ft; unknown-altitude contacts are never hidden.
+  Display-only, persists in config (`alt_filter_on`, `alt_floor_ft`,
+  `alt_ceiling_ft`).
+- **Range follows zoom**: the point poll widens to cover the current disc
+  zoom (up to the feeds' 250 NM ≈ 463 km cap), so zooming out actually
+  reveals distant traffic instead of an empty ring past the configured
+  regional radius. The UI reports its zoom to Rust (`set_view_radius`);
+  effective query radius = max(regional radius, current zoom). Expect a
+  ~one-poll (≈5 s) lag after zooming out for the far traffic to populate.
 
 ## Window behavior
 
@@ -154,8 +166,11 @@ Live-editable from the gear panel (no rebuild); stored at
 `overhead_radius_km`, `overhead_ceiling_ft`, `regional_radius_nm` (≤250),
 `watchlist`, `poll_local_secs`, `poll_sqk_secs`, `alert_cooldown_secs`,
 `default_zoom_km`, `zoom_steps_km`, `emergency_squawks`, `toast_sound`
-(default off), `desktop_mode` (restart to apply), `feeds` (order = failover
-order). Default home is downtown Chicago — set yours first.
+(default off), `wx_enabled`, `alt_filter_on` / `alt_floor_ft` /
+`alt_ceiling_ft` (altitude band filter), `desktop_mode` (restart to apply),
+`feeds` (order = failover order). Default home is downtown Chicago — set
+yours first. `regional_radius_nm` is now a *floor* — the disc auto-widens the
+poll when you zoom out past it.
 
 ## Known limitations (accepted)
 

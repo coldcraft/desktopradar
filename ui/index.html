@@ -28,10 +28,23 @@
         </div>
       </div>
       <div id="zoom">
+        <button id="alt-toggle" class="chrome-btn" title="Altitude band filter">ALT</button>
         <button id="wx-toggle" class="chrome-btn" title="NEXRAD weather underlay">WX</button>
         <button id="zoom-out" class="chrome-btn" title="Zoom out">−</button>
         <div id="zoom-label" class="lcd-text">30 KM</div>
         <button id="zoom-in" class="chrome-btn" title="Zoom in">+</button>
+      </div>
+
+      <div id="alt-panel" class="hidden">
+        <div id="alt-readout" class="lcd-text">GND – 50k ft</div>
+        <label class="alt-row">
+          <span>CEIL</span>
+          <input id="alt-ceil" type="range" min="0" max="50000" step="500" value="50000">
+        </label>
+        <label class="alt-row">
+          <span>FLOOR</span>
+          <input id="alt-floor" type="range" min="0" max="50000" step="500" value="0">
+        </label>
       </div>
     </div>
 
@@ -41,12 +54,21 @@
       <span id="lcd-age">UPD --</span>
     </div>
 
-    <div id="events">
-      <div id="events-title">CONTACTS <span id="events-sub">interesting &amp; emergency</span></div>
-      <ul id="event-list"><li class="ev-empty">nothing interesting aloft</li></ul>
+    <div id="rail">
+      <button class="rail-btn" data-drawer="contacts" title="Live contacts — catch them">CONTACTS</button>
+      <button class="rail-btn" data-drawer="dex" title="Your caught airframes">DEX</button>
+      <button class="rail-btn" data-drawer="milestones" title="Personal milestones">MILESTONES</button>
     </div>
 
     <div id="attrib">data © <span>adsb.lol</span> · <a id="fi-link">adsb.fi</a> · <span>airplanes.live</span> (ODbL)</div>
+
+    <div id="drawer" class="drawer">
+      <div class="panel-head">
+        <span id="drawer-title">CONTACTS</span>
+        <button id="drawer-close" class="chrome-btn">✕</button>
+      </div>
+      <div id="drawer-body"></div>
+    </div>
 
     <div id="tooltip" class="hidden"></div>
 

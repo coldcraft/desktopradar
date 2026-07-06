@@ -35,6 +35,11 @@ pub struct Config {
     pub toast_sound: bool,
     /// NEXRAD weather underlay on the disc.
     pub wx_enabled: bool,
+    /// Altitude band filter for the disc (display only). Ceiling at the slider
+    /// max means "and above". Ground traffic reads as 0 ft.
+    pub alt_filter_on: bool,
+    pub alt_floor_ft: f64,
+    pub alt_ceiling_ft: f64,
     /// "auto" (WorkerW, fall back to bottom) | "workerw" | "bottom" | "normal"
     pub desktop_mode: String,
     pub feeds: Vec<Feed>,
@@ -62,6 +67,9 @@ impl Default for Config {
             emergency_squawks: vec!["7500".into(), "7600".into(), "7700".into()],
             toast_sound: false,
             wx_enabled: false,
+            alt_filter_on: false,
+            alt_floor_ft: 0.0,
+            alt_ceiling_ft: 50000.0,
             desktop_mode: "auto".into(),
             feeds: vec![
                 Feed {
