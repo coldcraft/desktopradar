@@ -603,31 +603,61 @@ document.getElementById("card-globe").addEventListener("click", () => {
 // One append-only sightings table lives in Rust; each drawer is a view over
 // it. Passive polling fills the log; a Catch click promotes a contact into the
 // dex. Contacts renders live (this pass); Dex/Milestones land next.
-let activeDrawer = null;
+const openDrawers = new Set(); // any combination can be open at once
 let caughtHexes = new Set(); // hexes already in the dex, from Rust
 let rarityMap = {};          // type_code -> tier, so live contacts show rarity
 
+const DRAWER_BODY = { contacts: "body-contacts", dex: "body-dex", milestones: "body-milestones" };
+function bodyOf(name) { return document.getElementById(DRAWER_BODY[name]); }
+function railBtn(name) { return document.querySelector(`.rail-btn[data-drawer="${name}"]`); }
+
+function toggleDrawer(name) {
+  openDrawers.has(name) ? closeDrawer(name) : openDrawer(name);
+}
 function openDrawer(name) {
-  if (activeDrawer === name) { closeDrawer(); return; }
-  activeDrawer = name;
-  document.querySelectorAll(".rail-btn").forEach(b =>
-    b.classList.toggle("latched", b.dataset.drawer === name));
-  document.getElementById("drawer-title").textContent = name.toUpperCase();
-  document.getElementById("drawer").classList.add("open");
-  renderDrawer();
+  openDrawers.add(name);
+  document.getElementById("dw-" + name).classList.add("open");
+  railBtn(name)?.classList.add("latched");
+  syncColumn();
+  renderDrawer(name);
 }
-function closeDrawer() {
-  activeDrawer = null;
-  document.querySelectorAll(".rail-btn").forEach(b => b.classList.remove("latched"));
-  document.getElementById("drawer").classList.remove("open");
+function closeDrawer(name) {
+  openDrawers.delete(name);
+  document.getElementById("dw-" + name).classList.remove("open");
+  railBtn(name)?.classList.remove("latched");
+  syncColumn();
 }
-function renderDrawer() {
-  if (activeDrawer === "contacts") renderContacts();
-  else if (activeDrawer === "dex") renderDex();
-  else if (activeDrawer === "milestones") renderMilestones();
+function renderDrawer(name) {
+  if (name === "contacts") renderContacts();
+  else if (name === "dex") renderDex();
+  else if (name === "milestones") renderMilestones();
 }
-function renderPlaceholder(html) {
-  document.getElementById("drawer-body").innerHTML = `<div class="drawer-empty">${html}</div>`;
+function renderPlaceholder(name, html) {
+  bodyOf(name).innerHTML = `<div class="drawer-empty">${html}</div>`;
+}
+
+// The window itself grows to fit open drawers and shrinks back when the last
+// closes, so the cabinet never drags a dead transparent slab across the desktop.
+const CABINET_W = 460, DRAWERS_W = 812, WIN_H = 556;
+let shrinkTimer = null;
+function setWinSize(w) {
+  try {
+    const LS = window.__TAURI__.window.LogicalSize;
+    const win = getCurrentWindow();
+    if (win.setSize && LS) win.setSize(new LS(w, WIN_H)).catch(() => {});
+  } catch { /* not under Tauri (preview) */ }
+}
+function syncColumn() {
+  const any = openDrawers.size > 0;
+  const col = document.getElementById("drawers");
+  clearTimeout(shrinkTimer);
+  if (any) {
+    setWinSize(DRAWERS_W);   // grow first so the drawer slides into real space
+    col.classList.add("any-open");
+  } else {
+    col.classList.remove("any-open");
+    shrinkTimer = setTimeout(() => setWinSize(CABINET_W), 340); // after it thunks shut
+  }
 }
 
 function relTime(sec) {
@@ -642,10 +672,10 @@ function relTime(sec) {
 // Achievements against yourself — no leaderboard. Unlocked first (most recent
 // up top), then locked ones showing progress toward their target.
 async function renderMilestones() {
-  const body = document.getElementById("drawer-body");
+  const body = bodyOf("milestones");
   let m;
-  try { m = await invoke("milestones"); } catch { renderPlaceholder("milestones unavailable"); return; }
-  if (activeDrawer !== "milestones") return;
+  try { m = await invoke("milestones"); } catch { renderPlaceholder("milestones", "milestones unavailable"); return; }
+  if (!openDrawers.has("milestones")) return;
   const stat = (n, label) => `<div class="ms-stat"><span class="ms-num">${n}</span><span class="ms-lab">${label}</span></div>`;
   const stats = `<div class="ms-stats">` +
     stat(m.total_caught, "CAUGHT") + stat(m.distinct_types, "TYPES") +
@@ -665,12 +695,12 @@ async function renderMilestones() {
 // The dex: your caught airframes (caught_at IS NOT NULL), newest catch first.
 // One row per hex — the collection you deliberately claimed off the passive log.
 async function renderDex() {
-  const body = document.getElementById("drawer-body");
+  const body = bodyOf("dex");
   let entries;
-  try { entries = await invoke("dex"); } catch { renderPlaceholder("dex unavailable"); return; }
-  if (activeDrawer !== "dex") return; // user toggled away while the query ran
+  try { entries = await invoke("dex"); } catch { renderPlaceholder("dex", "dex unavailable"); return; }
+  if (!openDrawers.has("dex")) return; // user closed it while the query ran
   if (!entries.length) {
-    renderPlaceholder(`Your dex is empty.<br>Open <b>CONTACTS</b> and <b>catch</b> something.`);
+    renderPlaceholder("dex", `Your dex is empty.<br>Open <b>CONTACTS</b> and <b>catch</b> something.`);
     return;
   }
   const types = new Set(entries.map(e => e.type_code).filter(Boolean));
@@ -698,7 +728,7 @@ async function renderDex() {
 // Live, unfiltered — every airframe the antenna hears, so common airliners are
 // catchable too (early dopamine), not just the interesting/emergency traffic.
 function renderContacts() {
-  const body = document.getElementById("drawer-body");
+  const body = bodyOf("contacts");
   const seen = new Set();
   const items = [];
   for (const a of [...(snapshot.ac || []), ...globalEmerg]) {
@@ -712,7 +742,7 @@ function renderContacts() {
     (y.is_emergency - x.is_emergency) ||
     ((x.dst_km ?? 1e9) - (y.dst_km ?? 1e9)));
   if (!items.length) {
-    renderPlaceholder("nothing aloft");
+    renderPlaceholder("contacts", "nothing aloft");
     return;
   }
   body.innerHTML = `<ul class="contact-list">` + items.map(a => {
@@ -758,6 +788,9 @@ async function doCatch(hex, btn) {
     btn.classList.add("caught");
     btn.textContent = "✓ GOT";
     if (newly) { btn.classList.add("flash"); btn.addEventListener("animationend", () => btn.classList.remove("flash"), { once: true }); }
+    // if the Dex or Milestones drawers are open too, reflect the new catch
+    if (newly && openDrawers.has("dex")) renderDex();
+    if (newly && openDrawers.has("milestones")) renderMilestones();
   } catch (e) {
     // store unavailable — leave the button as-is so the user can retry
   }
@@ -845,8 +878,9 @@ S("settings-save").addEventListener("click", async () => {
 
 // ————— drawer rail —————
 document.querySelectorAll(".rail-btn").forEach(b =>
-  b.addEventListener("click", () => openDrawer(b.dataset.drawer)));
-document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+  b.addEventListener("click", () => toggleDrawer(b.dataset.drawer)));
+document.querySelectorAll(".drawer-x").forEach(b =>
+  b.addEventListener("click", () => closeDrawer(b.dataset.close)));
 
 // ————— window chrome —————
 document.getElementById("btn-close").addEventListener("click", () => {
@@ -872,7 +906,7 @@ listen("radar:update", ev => {
   }
   document.getElementById("lcd-feed").textContent = "FEED " + snapshot.feed.toUpperCase();
   document.getElementById("lcd-count").textContent = snapshot.ac.length + " AC";
-  if (activeDrawer === "contacts") renderContacts();
+  if (openDrawers.has("contacts")) renderContacts();
   if (cardHex && !document.getElementById("card").classList.contains("hidden")) {
     // live-refresh the open card without resetting the route line
     const a = findAc(cardHex);
@@ -885,7 +919,7 @@ listen("radar:update", ev => {
 
 listen("radar:emergencies", ev => {
   globalEmerg = ev.payload.ac || [];
-  if (activeDrawer === "contacts") renderContacts();
+  if (openDrawers.has("contacts")) renderContacts();
 });
 
 listen("radar:error", ev => {
@@ -905,7 +939,7 @@ listen("radar:focus", ev => {
   setInterval(async () => {
     try {
       rarityMap = await invoke("rarity_map");
-      if (activeDrawer === "contacts") renderContacts();
+      if (openDrawers.has("contacts")) renderContacts();
     } catch { /* store off */ }
   }, 120000);
   zoomKm = cfg.default_zoom_km;

@@ -9,13 +9,22 @@ html, body {
   height: 100%;
 }
 
+/* transparent shell: cabinet on the left, drawers slide out to the right */
 #gadget {
   position: relative;
+  display: flex;
+  align-items: stretch;
+  margin: 8px;
+  width: max-content;
+}
+
+#cabinet {
+  position: relative;
+  flex: none;
   width: 444px;
   height: 540px;
-  margin: 8px;
   border-radius: 18px;
-  /* clip drawers when they slide off the bottom edge */
+  /* clip the settings/card overlays to the rounded frame */
   overflow: hidden;
   /* brushed aluminum */
   background:
@@ -32,6 +41,7 @@ html, body {
   display: flex;
   flex-direction: column;
   padding: 10px 12px 8px;
+  z-index: 2;
 }
 
 /* corner screws */
@@ -226,25 +236,67 @@ html, body {
   text-shadow: 0 1px 0 rgba(255,255,255,0.35);
 }
 
-/* ————— sliding drawer ————— */
-#drawer {
-  position: absolute;
-  z-index: 45;
-  left: 10px; right: 10px; bottom: 8px;
-  height: 66%;
-  border-radius: 10px 10px 8px 8px;
+/* ————— drawers: slide out the right edge, stack, share the height ————— */
+#drawers {
+  flex: none;
+  width: 0;                         /* collapsed when nothing is open */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+  /* column reveal — snappy, no overshoot (the thunk lives on each drawer) */
+  transition: width 0.30s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+#drawers.any-open {
+  width: 344px;
+  padding-left: 8px;
+}
+
+/* one physical drawer; open drawers flex-share the column's height */
+.drawer {
+  flex: 0 1 0;                      /* closed: zero height */
+  width: 336px;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
   background: linear-gradient(#2c3035, #1d2023);
   border: 1px solid #565b61;
-  box-shadow: 0 -6px 24px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.15);
+  border-left: 3px solid #6b7178;   /* machined drawer front */
+  box-shadow: 4px 4px 14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
   color: #d7dce1;
-  display: flex; flex-direction: column;
-  overflow: hidden;
-  transform: translateY(112%);
-  transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  opacity: 0;
+  transform: translateX(30px);
+  /* thunk: slide out sideways and settle with a slight overshoot */
+  transition: opacity 0.18s ease,
+              transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-#drawer.open { transform: translateY(0); }
-#drawer-title { font-family: Consolas, monospace; color: #9df5b8; text-shadow: 0 0 6px rgba(80,255,140,0.5); }
-#drawer-body { flex: 1; overflow-y: auto; font-size: 11px; }
+.drawer.open {
+  flex: 1 1 0;
+  opacity: 1;
+  transform: translateX(0);
+}
+.drawer-head {
+  flex: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 7px 5px 9px;
+  background: linear-gradient(#43474d, #303439);
+  border-bottom: 1px solid #17191c;
+}
+.drawer-name {
+  flex: 1;
+  font-family: Consolas, monospace; font-size: 12px; font-weight: 700; letter-spacing: 2px;
+  color: #9df5b8; text-shadow: 0 0 6px rgba(80,255,140,0.5);
+}
+/* machined pull-nub on the drawer front */
+.drawer-pull {
+  width: 4px; height: 15px; border-radius: 2px; flex: none;
+  background: linear-gradient(#e8eaec, #9aa0a6 55%, #565b61);
+  box-shadow: inset 0 -1px 1px rgba(0,0,0,0.5), 0 1px 1px rgba(255,255,255,0.3);
+}
+.drawer-x { min-width: 20px; height: 20px; font-size: 11px; padding: 0 5px; }
+.drawer-body { flex: 1; overflow-y: auto; font-size: 11px; min-height: 0; }
 .drawer-empty { padding: 22px 16px; text-align: center; color: #7d8288; font-style: italic; line-height: 1.7; }
 .drawer-empty b { color: #9df5b8; font-style: normal; }
 
