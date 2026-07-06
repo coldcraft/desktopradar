@@ -11,6 +11,7 @@ use crate::classify::UiAircraft;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -200,7 +201,50 @@ impl Store {
              CREATE INDEX IF NOT EXISTS idx_sightings_notable ON sightings(notable);",
         )
         .map_err(|e| e.to_string())?;
+        // Best-effort auto-backup on every launch — a rare catch should never
+        // be one mishap away from gone. Never fails the open.
+        if let Some(dir) = path.parent() {
+            Self::backup(&conn, &dir.join("backups"));
+        }
         Ok(conn)
+    }
+
+    /// Write a consolidated snapshot into `dir` (VACUUM INTO folds in the WAL),
+    /// then keep only the newest few. Strictly additive w.r.t. the live DB — it
+    /// creates/removes files under `dir` but never touches sightings.db.
+    fn backup(conn: &Connection, dir: &Path) {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("dex backup dir failed: {e}");
+            return;
+        }
+        let out = dir.join(format!("dex-{}.db", now_secs()));
+        if out.exists() {
+            return; // already snapshotted this second
+        }
+        // Path is our own config dir; escape quotes for the SQL string literal.
+        let lit = out.to_string_lossy().replace('\'', "''");
+        match conn.execute(&format!("VACUUM INTO '{lit}'"), []) {
+            Ok(_) => Self::prune(dir, 10),
+            Err(e) => eprintln!("dex backup failed: {e}"),
+        }
+    }
+
+    /// Keep the newest `keep` `dex-<secs>.db` snapshots in `dir`, deleting older
+    /// ones. Only ever removes files matching that exact pattern.
+    fn prune(dir: &Path, keep: usize) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut snaps: Vec<(i64, std::path::PathBuf)> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter_map(|p| {
+                let name = p.file_name()?.to_str()?.to_string();
+                let ts = name.strip_prefix("dex-")?.strip_suffix(".db")?.parse::<i64>().ok()?;
+                Some((ts, p))
+            })
+            .collect();
+        snaps.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+        for (_, p) in snaps.into_iter().skip(keep) {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     /// Passive log: upsert one contact. First-seen and caught_at are never
@@ -479,5 +523,40 @@ impl Store {
             shinies,
             achievements: a,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_keeps_newest_snapshots_and_spares_everything_else() {
+        let dir = std::env::temp_dir().join(format!("adsb_prune_{}", now_secs()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 1..=15 {
+            std::fs::write(dir.join(format!("dex-{i}.db")), b"x").unwrap();
+        }
+        // Decoys that MUST survive — prune only touches dex-<n>.db.
+        std::fs::write(dir.join("sightings.db"), b"x").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+
+        Store::prune(&dir, 10);
+
+        let left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        // decoys untouched
+        assert!(left.contains(&"sightings.db".to_string()));
+        assert!(left.contains(&"notes.txt".to_string()));
+        // 10 newest snapshots kept (dex-6..=15), older 5 removed
+        assert_eq!(left.iter().filter(|n| n.starts_with("dex-")).count(), 10);
+        assert!(left.contains(&"dex-15.db".to_string()));
+        assert!(left.contains(&"dex-6.db".to_string()));
+        assert!(!left.contains(&"dex-5.db".to_string()));
+        assert!(!left.contains(&"dex-1.db".to_string()));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
