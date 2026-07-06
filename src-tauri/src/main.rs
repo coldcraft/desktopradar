@@ -168,6 +168,12 @@ fn milestones(state: tauri::State<'_, AppState>) -> store::Milestones {
     state.store.milestones()
 }
 
+/// type_code -> rarity tier, so the Contacts list can flag rare birds live.
+#[tauri::command]
+fn rarity_map(state: tauri::State<'_, AppState>) -> std::collections::HashMap<String, String> {
+    state.store.rarity_map()
+}
+
 /// NEXRAD composite tile (Iowa Environmental Mesonet, no key), returned as a
 /// data URL so the webview never does HTTP and the canvas never taints.
 /// Cached per 5-minute bucket, matching IEM's refresh cadence.
@@ -647,6 +653,7 @@ fn main() {
             dex_hexes,
             dex,
             milestones,
+            rarity_map,
             set_view_radius,
             set_activatable
         ])

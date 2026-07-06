@@ -605,6 +605,7 @@ document.getElementById("card-globe").addEventListener("click", () => {
 // dex. Contacts renders live (this pass); Dex/Milestones land next.
 let activeDrawer = null;
 let caughtHexes = new Set(); // hexes already in the dex, from Rust
+let rarityMap = {};          // type_code -> tier, so live contacts show rarity
 
 function openDrawer(name) {
   if (activeDrawer === name) { closeDrawer(); return; }
@@ -722,10 +723,13 @@ function renderContacts() {
     const aog = a.alt_baro === "ground" && a.airport ? "@ " + a.airport : null;
     const detail = [a.operator, routeTextFor(a), aog, a.t].filter(Boolean).slice(0, 2).join(" · ");
     const caught = caughtHexes.has(a.hex);
+    // flag rarer-than-common types so a good catch stands out in the list
+    const tier = a.t ? rarityMap[a.t] : null;
+    const rar = (tier && tier !== "common") ? `<span class="rar rar-${tier}">${tier}</span>` : "";
     return `<li data-hex="${a.hex}">` +
       `<span class="ev-dot ${dot}"></span>` +
       `<span class="ev-cs">${callsignOf(a)}</span>` +
-      `<span class="ev-why">${detail || reasonLabel(a) || ""}</span>` +
+      `<span class="ev-why">${rar}${detail || reasonLabel(a) || ""}</span>` +
       `<span class="ev-where">${where}</span>` +
       `<button class="catch-btn ${caught ? "caught" : ""}" data-catch="${a.hex}">${caught ? "✓ GOT" : "CATCH"}</button>` +
       `</li>`;
@@ -896,6 +900,14 @@ listen("radar:focus", ev => {
 (async function init() {
   cfg = await invoke("get_config");
   try { caughtHexes = new Set(await invoke("dex_hexes")); } catch { /* store off */ }
+  try { rarityMap = await invoke("rarity_map"); } catch { /* store off */ }
+  // the rarity distribution self-calibrates as the log grows; refresh slowly
+  setInterval(async () => {
+    try {
+      rarityMap = await invoke("rarity_map");
+      if (activeDrawer === "contacts") renderContacts();
+    } catch { /* store off */ }
+  }, 120000);
   zoomKm = cfg.default_zoom_km;
   // valid projection center before the first poll lands
   snapshot.home = { lat: cfg.home_lat, lon: cfg.home_lon };

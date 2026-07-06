@@ -524,6 +524,31 @@ impl Store {
             achievements: a,
         }
     }
+
+    /// type_code -> rarity tier over the whole log, so the live Contacts list
+    /// can flag a rare bird before you catch it. Read-only.
+    pub fn rarity_map(&self) -> HashMap<String, String> {
+        let guard = self.conn.lock().unwrap();
+        let Some(conn) = guard.as_ref() else {
+            return HashMap::new();
+        };
+        let mut counts: Vec<(String, i64)> = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT type_code, COUNT(*) FROM sightings
+             WHERE type_code IS NOT NULL AND type_code <> ''
+             GROUP BY type_code",
+        ) {
+            if let Ok(it) =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            {
+                counts = it.filter_map(|r| r.ok()).collect();
+            }
+        }
+        rarity_tiers(&counts)
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect()
+    }
 }
 
 #[cfg(test)]
