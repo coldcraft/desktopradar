@@ -498,6 +498,21 @@ impl Store {
         threshold("ops5", "Frequent Flyer", distinct_operators, 5);
         threshold("ops10", "Airline Bingo", distinct_operators, 10);
         threshold("shiny5", "Treasure Hunter", shinies, 5);
+        threshold("caught250", "Archivist", total_caught, 250);
+        threshold("caught500", "Completionist", total_caught, 500);
+        threshold("types50", "Field Guide", distinct_types, 50);
+        threshold("types100", "Encyclopedist", distinct_types, 100);
+        threshold("ops20", "Terminal Regular", distinct_operators, 20);
+        threshold("shiny10", "Magpie", shinies, 10);
+        threshold("shiny25", "Curator", shinies, 25);
+
+        // Dedication: distinct local calendar days on which you caught something.
+        let distinct_days = count(
+            "SELECT COUNT(DISTINCT strftime('%Y%m%d', caught_at, 'unixepoch', 'localtime'))
+             FROM sightings WHERE caught_at IS NOT NULL",
+        );
+        threshold("days7", "Regular", distinct_days, 7);
+        threshold("days30", "Devoted", distinct_days, 30);
 
         // Event achievements: unlocked by a specific kind of catch, dated by it.
         let mut event = |key: &str, title: &str, desc: &str, at: Option<i64>| {
@@ -514,6 +529,17 @@ impl Store {
         event("emergency", "Mayday", "Catch an emergency squawk", first("squawk IN ('7500','7600','7700')"));
         event("nordo", "Radio Silence", "Catch a NORDO — squawk 7600", first("squawk = '7600'"));
         event("hijack", "Unlawful", "Catch a hijack squawk — 7500", first("squawk = '7500'"));
+        event("night", "Night Watch", "Catch a contact between midnight and 5am",
+            first("CAST(strftime('%H', caught_at, 'unixepoch', 'localtime') AS INTEGER) < 5"));
+        event("deck", "On the Deck", "Catch an aircraft on the ground", first("alt = 0"));
+        event("angels", "Angels High", "Catch a contact above 40,000 ft", first("alt >= 40000"));
+        event("oldfriend", "Old Friend", "Catch an airframe you've logged 50+ times", first("seen_count >= 50"));
+        event("heli", "Rotorhead", "Catch a helicopter", first(
+            "type_code IN ('H60','UH60','H47','CH47','EC30','EC35','EC45','A139','A169','A109','R44','R66','B06','B407','B412','B429','S76','S92','AS50','H500','EC20','EC25')"));
+        event("heavy", "Heavy Iron", "Catch a widebody", first(
+            "type_code IN ('B742','B744','B748','B762','B763','B764','B772','B773','B77L','B77W','B788','B789','B78X','A332','A333','A339','A342','A343','A346','A359','A35K','A388','MD11','A306','A310')"));
+        event("bizjet", "Bizjet Row", "Catch a business jet", first(
+            "type_code IN ('GLF4','GLF5','GLF6','G280','GL5T','GL7T','LJ35','LJ45','LJ60','LJ75','C25A','C25B','C25C','C56X','C680','C700','C750','CL30','CL35','CL60','E50P','E55P','F2TH','F900','H25B','PC24','BE40','C525','C510')"));
 
         Milestones {
             total_seen,
