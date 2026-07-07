@@ -9,20 +9,18 @@ html, body {
   height: 100%;
 }
 
-/* transparent shell: cabinet on the left, drawers slide out to the right */
+/* the gadget stays put; olive-steel drawers slide out from UNDER its edges */
 #gadget {
   position: relative;
-  display: flex;
-  align-items: stretch;
   margin: 8px;
-  width: max-content;
+  width: 444px;
+  height: 540px;
 }
 
 #cabinet {
-  position: relative;
-  flex: none;
-  width: 444px;
-  height: 540px;
+  position: absolute;
+  inset: 0;
+  z-index: 3;                 /* on top, so the drawers tuck UNDER it */
   border-radius: 18px;
   /* clip the settings/card overlays to the rounded frame */
   overflow: hidden;
@@ -36,12 +34,12 @@ html, body {
     inset 0 1px 0 rgba(255,255,255,0.65),
     inset 0 -2px 3px rgba(0,0,0,0.35),
     inset 2px 0 3px rgba(255,255,255,0.18),
-    0 10px 28px rgba(0,0,0,0.55);
+    10px 0 22px rgba(0,0,0,0.5),      /* cast onto the right drawers */
+    0 12px 26px rgba(0,0,0,0.55);     /* cast onto the bottom drawer */
   border: 1px solid #3d4147;
   display: flex;
   flex-direction: column;
   padding: 10px 12px 8px;
-  z-index: 2;
 }
 
 /* corner screws */
@@ -236,69 +234,95 @@ html, body {
   text-shadow: 0 1px 0 rgba(255,255,255,0.35);
 }
 
-/* ————— drawers: slide out the right edge, stack, share the height ————— */
-#drawers {
-  flex: none;
-  width: 0;                         /* collapsed when nothing is open */
+/* ————— olive-steel drawers: slide out from UNDER the gadget's edges ————— */
+/* keep them hidden + un-animated until the first frame settles (no launch flash) */
+#gadget.booting .odrawer { visibility: hidden; transition: none; }
+.odrawer {
+  position: absolute;
+  z-index: 1;                              /* behind the cabinet (z 3) — tucks under it */
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow: hidden;
-  /* column reveal — snappy, no overshoot (the thunk lives on each drawer) */
-  transition: width 0.30s cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* the "thud": firm slide, slight overshoot into the stops, no fade */
+  transition: transform 0.36s cubic-bezier(0.33, 1.5, 0.5, 1);
 }
-#drawers.any-open {
-  width: 344px;
-  padding-left: 8px;
+/* two drawers off the RIGHT edge — NEAR (top), DECK (bottom): [ tray | front ] */
+.odrawer.edge-right {
+  left: 444px;                             /* the cabinet's right edge */
+  flex-direction: row;
+  height: 258px;
+  transform: translateX(-342px);           /* closed: tray under the cabinet, only the front peeks */
+}
+.odrawer.edge-right.pos-top { top: 14px; }
+.odrawer.edge-right.pos-bottom { top: 282px; }
+.odrawer.edge-right.open { transform: translateX(0); }
+/* one drawer off the BOTTOM edge — STARS: [ tray / front ] */
+.odrawer.edge-bottom {
+  top: 540px;                              /* the cabinet's bottom edge */
+  left: 14px;
+  flex-direction: column;
+  width: 416px;
+  transform: translateY(-206px);
+}
+.odrawer.edge-bottom.open { transform: translateY(0); }
+
+/* the tray: stamped-olive box around a recessed content well */
+.otray {
+  flex: none;
+  padding: 5px;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, rgba(255,255,255,.03) 1px 2px),
+    linear-gradient(#5f6440, #484c30);
+  border: 1px solid #20220f;
+}
+.edge-right .otray { width: 342px; height: 258px; border-right: none; box-shadow: inset 8px 0 14px rgba(0,0,0,.72); }
+.edge-bottom .otray { width: 416px; height: 206px; border-bottom: none; box-shadow: inset 0 8px 14px rgba(0,0,0,.72); }
+.drawer-body {
+  height: 100%;
+  overflow-y: auto;
+  background: linear-gradient(#1b1e15, #14160f);
+  border: 1px solid #20220f;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.85);
+  font-size: 11px;
 }
 
-/* one physical drawer; open drawers flex-share the column's height */
-.drawer {
-  flex: 0 1 0;                      /* closed: zero height */
-  width: 336px;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  border-radius: 8px;
-  background: linear-gradient(#2c3035, #1d2023);
-  border: 1px solid #565b61;
-  border-left: 3px solid #6b7178;   /* machined drawer front */
-  box-shadow: 4px 4px 14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
-  color: #d7dce1;
-  opacity: 0;
-  transform: translateX(30px);
-  /* thunk: slide out sideways and settle with a slight overshoot */
-  transition: opacity 0.18s ease,
-              transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.drawer.open {
-  flex: 1 1 0;
-  opacity: 1;
-  transform: translateX(0);
-}
-.drawer-head {
+/* the drawer FRONT: olive-steel face, steel pull + stencil label — this is the toggle */
+.ofront {
   flex: none;
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 7px 5px 9px;
-  background: linear-gradient(#43474d, #303439);
-  border-bottom: 1px solid #17191c;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(#6d7149, #565a39 55%, #454930);
+  border: 1px solid #20220f;
 }
-.drawer-name {
-  flex: 1;
-  font-family: Consolas, monospace; font-size: 12px; font-weight: 700; letter-spacing: 2px;
-  color: #9df5b8; text-shadow: 0 0 6px rgba(80,255,140,0.5);
+.ofront:hover { background: linear-gradient(#787c52, #606543 55%, #4d5134); }
+.olabel {
+  font-family: "Arial Narrow", "Impact", sans-serif;
+  font-weight: 700; letter-spacing: 2px; font-size: 14px;
+  color: #20220f; text-shadow: 0 1px 0 rgba(255,255,255,.15);
 }
-/* machined pull-nub on the drawer front */
-.drawer-pull {
-  width: 4px; height: 15px; border-radius: 2px; flex: none;
-  background: linear-gradient(#e8eaec, #9aa0a6 55%, #565b61);
-  box-shadow: inset 0 -1px 1px rgba(0,0,0,0.5), 0 1px 1px rgba(255,255,255,0.3);
+.opull {
+  flex: none;
+  background: linear-gradient(#e6e9ec, #a7adb3 50%, #7c8288);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 0 0 1px #4a4f55;
 }
-.drawer-x { min-width: 20px; height: 20px; font-size: 11px; padding: 0 5px; }
-.drawer-body { flex: 1; overflow-y: auto; font-size: 11px; min-height: 0; }
+.edge-right .ofront { width: 30px; flex-direction: column; gap: 12px; box-shadow: inset 1px 0 0 rgba(255,255,255,.2), -4px 0 9px rgba(0,0,0,.4); }
+.edge-right .olabel { writing-mode: vertical-rl; transform: rotate(180deg); }
+.edge-right .opull { width: 9px; height: 66px; border-radius: 4.5px; }
+.edge-bottom .ofront { height: 30px; gap: 14px; box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 4px 9px rgba(0,0,0,.4); }
+.edge-bottom .opull { height: 9px; width: 74px; border-radius: 4.5px; }
+
 .drawer-empty { padding: 22px 16px; text-align: center; color: #7d8288; font-style: italic; line-height: 1.7; }
 .drawer-empty b { color: #9df5b8; font-style: normal; }
+
+/* ————— STARS: military ribbon rack ————— */
+.rack-stat { padding: 5px 9px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #b7c23a; background: linear-gradient(#2a2d1c, #1e2014); border-bottom: 1px solid #0e1008; }
+.rack { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px 6px; padding: 8px 9px; }
+.ribbon {
+  height: 17px; border-radius: 1px; cursor: pointer; overflow: hidden;
+  border: 1px solid #8a6a20;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -3px 4px rgba(0,0,0,.4);
+}
+.ribbon:hover { outline: 1px solid #e8e0b0; outline-offset: 1px; }
+.ribbon.locked { border-color: #0e1008; background: #24261a; box-shadow: inset 0 2px 4px rgba(0,0,0,.7); cursor: default; }
 
 /* dex stat header */
 .dex-stat {

@@ -609,7 +609,6 @@ let rarityMap = {};          // type_code -> tier, so live contacts show rarity
 
 const DRAWER_BODY = { contacts: "body-contacts", dex: "body-dex", milestones: "body-milestones" };
 function bodyOf(name) { return document.getElementById(DRAWER_BODY[name]); }
-function railBtn(name) { return document.querySelector(`.rail-btn[data-drawer="${name}"]`); }
 
 function toggleDrawer(name) {
   openDrawers.has(name) ? closeDrawer(name) : openDrawer(name);
@@ -617,15 +616,13 @@ function toggleDrawer(name) {
 function openDrawer(name) {
   openDrawers.add(name);
   document.getElementById("dw-" + name).classList.add("open");
-  railBtn(name)?.classList.add("latched");
-  syncColumn();
+  syncWindow(true);          // grow the window first so the drawer slides into real space
   renderDrawer(name);
 }
 function closeDrawer(name) {
   openDrawers.delete(name);
   document.getElementById("dw-" + name).classList.remove("open");
-  railBtn(name)?.classList.remove("latched");
-  syncColumn();
+  syncWindow(false);         // shrink after it thuds shut
 }
 function renderDrawer(name) {
   if (name === "contacts") renderContacts();
@@ -636,28 +633,27 @@ function renderPlaceholder(name, html) {
   bodyOf(name).innerHTML = `<div class="drawer-empty">${html}</div>`;
 }
 
-// The window itself grows to fit open drawers and shrinks back when the last
-// closes, so the cabinet never drags a dead transparent slab across the desktop.
-const CABINET_W = 460, DRAWERS_W = 812, WIN_H = 556;
-let shrinkTimer = null;
-function setWinSize(w) {
+// The window grows on whichever edge has an open drawer — right for NEAR/DECK,
+// down for STARS — and shrinks back when they close, so only the gadget's
+// footprint sits on the desktop at rest.
+const W_CLOSED = 490, W_OPEN = 832, H_CLOSED = 586, H_OPEN = 792;
+let resizeTimer = null;
+function setWinSize(w, h) {
   try {
     const LS = window.__TAURI__.window.LogicalSize;
     const win = getCurrentWindow();
-    if (win.setSize && LS) win.setSize(new LS(w, WIN_H)).catch(() => {});
+    if (win.setSize && LS) win.setSize(new LS(w, h)).catch(() => {});
   } catch { /* not under Tauri (preview) */ }
 }
-function syncColumn() {
-  const any = openDrawers.size > 0;
-  const col = document.getElementById("drawers");
-  clearTimeout(shrinkTimer);
-  if (any) {
-    setWinSize(DRAWERS_W);   // grow first so the drawer slides into real space
-    col.classList.add("any-open");
-  } else {
-    col.classList.remove("any-open");
-    shrinkTimer = setTimeout(() => setWinSize(CABINET_W), 340); // after it thunks shut
-  }
+function targetSize() {
+  const w = (openDrawers.has("contacts") || openDrawers.has("dex")) ? W_OPEN : W_CLOSED;
+  const h = openDrawers.has("milestones") ? H_OPEN : H_CLOSED;
+  return [w, h];
+}
+function syncWindow(opening) {
+  clearTimeout(resizeTimer);
+  if (opening) setWinSize(...targetSize());                          // grow now
+  else resizeTimer = setTimeout(() => setWinSize(...targetSize()), 380); // shrink after the slide
 }
 
 function relTime(sec) {
@@ -668,28 +664,55 @@ function relTime(sec) {
   return Math.floor(d / 86400) + "d ago";
 }
 
-// Milestones: collection stats + personal achievements over the whole log.
-// Achievements against yourself — no leaderboard. Unlocked first (most recent
-// up top), then locked ones showing progress toward their target.
+// STARS = commendations. Each achievement is a service ribbon — earned ones
+// wear a procedurally-varied stripe pattern, locked ones are empty slots.
+// Hover any ribbon for the citation.
+const escHtml = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const RIB_BASE = ["#35507a", "#3f7a4a", "#6a3f7a", "#7a2f2f", "#2f6a7a", "#6f6330", "#46485a", "#7a3f5a", "#2f5a3f", "#b0472f"];
+const RIB_ACC = ["#c9a227", "#e8e8e8", "#b23b3b", "#2f4a7a", "#d9c47a", "#151515", "#f0f0f0", "#bfc4cc", "#e0b040"];
+function ribHash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+function ribbonBg(key) {
+  const h = ribHash(key);
+  const base = RIB_BASE[h % RIB_BASE.length];
+  const a1 = RIB_ACC[(h >> 3) % RIB_ACC.length];
+  const a2 = RIB_ACC[(h >> 8) % RIB_ACC.length];
+  return (h & 1)
+    ? `linear-gradient(90deg, ${base} 0 33%, ${a1} 33% 43%, ${base} 43% 57%, ${a1} 57% 67%, ${base} 67% 100%)`
+    : `linear-gradient(90deg, ${base} 0 37%, ${a1} 37% 50%, ${a2} 50% 63%, ${base} 63% 100%)`;
+}
+function ribbonTip(ev, el) {
+  tooltip.innerHTML = `<div class="tt-cs">${el.dataset.title}</div>${el.dataset.note}`;
+  tooltip.classList.remove("hidden");
+  ribbonTipMove(ev);
+}
+function ribbonTipMove(ev) {
+  let tx = ev.clientX + 14, ty = ev.clientY + 14;
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  if (tx + tw > window.innerWidth - 4) tx = ev.clientX - tw - 14;
+  if (ty + th > window.innerHeight - 4) ty = ev.clientY - th - 14;
+  tooltip.style.left = tx + "px"; tooltip.style.top = ty + "px";
+}
 async function renderMilestones() {
   const body = bodyOf("milestones");
   let m;
-  try { m = await invoke("milestones"); } catch { renderPlaceholder("milestones", "milestones unavailable"); return; }
+  try { m = await invoke("milestones"); } catch { renderPlaceholder("milestones", "commendations unavailable"); return; }
   if (!openDrawers.has("milestones")) return;
-  const stat = (n, label) => `<div class="ms-stat"><span class="ms-num">${n}</span><span class="ms-lab">${label}</span></div>`;
-  const stats = `<div class="ms-stats">` +
-    stat(m.total_caught, "CAUGHT") + stat(m.distinct_types, "TYPES") +
-    stat(m.distinct_operators, "OPS") + stat(m.shinies, "★") +
-    stat(m.total_seen, "SEEN") + `</div>`;
   const all = m.achievements || [];
-  const unlocked = all.filter((a) => a.unlocked).sort((x, y) => (y.at ?? 0) - (x.at ?? 0));
-  const locked = all.filter((a) => !a.unlocked);
-  const row = (a) => `<li class="ms-ach ${a.unlocked ? "unlocked" : "locked"}">` +
-    `<span class="ms-ico">${a.unlocked ? "★" : "○"}</span>` +
-    `<span class="ms-title">${a.title}</span>` +
-    `<span class="ms-note">${a.note}</span>` +
-    `<span class="ms-when">${a.unlocked && a.at ? relTime(a.at) : ""}</span></li>`;
-  body.innerHTML = stats + `<ul class="ms-list">` + [...unlocked, ...locked].map(row).join("") + `</ul>`;
+  const earned = all.filter((a) => a.unlocked).length;
+  const rack = all.map((a) => {
+    const note = escHtml(a.unlocked ? a.note + (a.at ? " · " + relTime(a.at) : "") : "locked · " + a.note);
+    return a.unlocked
+      ? `<div class="ribbon" style="background:${ribbonBg(a.key)}" data-title="${escHtml(a.title)}" data-note="${note}"></div>`
+      : `<div class="ribbon locked" data-title="${escHtml(a.title)}" data-note="${note}"></div>`;
+  }).join("");
+  body.innerHTML =
+    `<div class="rack-stat">${earned} / ${all.length} EARNED · ${m.total_caught} CAUGHT · ${m.shinies} ★</div>` +
+    `<div class="rack">${rack}</div>`;
+  body.querySelectorAll(".ribbon").forEach((r) => {
+    r.addEventListener("mouseenter", (ev) => ribbonTip(ev, r));
+    r.addEventListener("mousemove", ribbonTipMove);
+    r.addEventListener("mouseleave", () => tooltip.classList.add("hidden"));
+  });
 }
 
 // The dex: your caught airframes (caught_at IS NOT NULL), newest catch first.
@@ -876,11 +899,9 @@ S("settings-save").addEventListener("click", async () => {
   }
 });
 
-// ————— drawer rail —————
-document.querySelectorAll(".rail-btn").forEach(b =>
-  b.addEventListener("click", () => toggleDrawer(b.dataset.drawer)));
-document.querySelectorAll(".drawer-x").forEach(b =>
-  b.addEventListener("click", () => closeDrawer(b.dataset.close)));
+// ————— drawer fronts are the pulls: click a handle to slide it open/shut —————
+document.querySelectorAll(".ofront").forEach(f =>
+  f.addEventListener("click", () => toggleDrawer(f.dataset.drawer)));
 
 // ————— window chrome —————
 document.getElementById("btn-close").addEventListener("click", () => {
@@ -959,4 +980,7 @@ listen("radar:focus", ev => {
   setZoomIdx(zoomIdx());
   sizeCanvas();
   requestAnimationFrame(draw);
+  // drawers are settled in their closed position — safe to reveal + animate now
+  requestAnimationFrame(() => requestAnimationFrame(() =>
+    document.getElementById("gadget").classList.remove("booting")));
 })();

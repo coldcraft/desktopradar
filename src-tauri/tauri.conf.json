@@ -12,8 +12,8 @@
       {
         "label": "main",
         "title": "ADS-B Radar",
-        "width": 460,
-        "height": 556,
+        "width": 490,
+        "height": 586,
         "resizable": false,
         "decorations": false,
         "transparent": true,

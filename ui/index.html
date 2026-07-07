@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="gadget">
+  <div id="gadget" class="booting">
     <div id="cabinet">
       <div id="screw-tl" class="screw"></div>
       <div id="screw-tr" class="screw"></div>
@@ -53,12 +53,6 @@
         <span id="lcd-feed">FEED --</span>
         <span id="lcd-count">0 AC</span>
         <span id="lcd-age">UPD --</span>
-      </div>
-
-      <div id="rail">
-        <button class="rail-btn" data-drawer="contacts" title="Live contacts — catch them">CONTACTS</button>
-        <button class="rail-btn" data-drawer="dex" title="Your caught airframes">DEX</button>
-        <button class="rail-btn" data-drawer="milestones" title="Personal milestones">MILESTONES</button>
       </div>
 
       <div id="attrib">data © <span>adsb.lol</span> · <a id="fi-link">adsb.fi</a> · <span>airplanes.live</span> (ODbL)</div>
@@ -128,19 +122,17 @@
       </div>
     </div>
 
-    <div id="drawers">
-      <section class="drawer" id="dw-contacts">
-        <div class="drawer-head"><span class="drawer-pull"></span><span class="drawer-name">CONTACTS</span><button class="drawer-x chrome-btn" data-close="contacts">✕</button></div>
-        <div class="drawer-body" id="body-contacts"></div>
-      </section>
-      <section class="drawer" id="dw-dex">
-        <div class="drawer-head"><span class="drawer-pull"></span><span class="drawer-name">DEX</span><button class="drawer-x chrome-btn" data-close="dex">✕</button></div>
-        <div class="drawer-body" id="body-dex"></div>
-      </section>
-      <section class="drawer" id="dw-milestones">
-        <div class="drawer-head"><span class="drawer-pull"></span><span class="drawer-name">MILESTONES</span><button class="drawer-x chrome-btn" data-close="milestones">✕</button></div>
-        <div class="drawer-body" id="body-milestones"></div>
-      </section>
+    <div id="dw-contacts" class="odrawer edge-right pos-top">
+      <div class="otray"><div class="drawer-body" id="body-contacts"></div></div>
+      <div class="ofront" data-drawer="contacts" title="NEAR — live contacts"><span class="opull"></span><span class="olabel">NEAR</span></div>
+    </div>
+    <div id="dw-dex" class="odrawer edge-right pos-bottom">
+      <div class="otray"><div class="drawer-body" id="body-dex"></div></div>
+      <div class="ofront" data-drawer="dex" title="DECK — your caught airframes"><span class="opull"></span><span class="olabel">DECK</span></div>
+    </div>
+    <div id="dw-milestones" class="odrawer edge-bottom">
+      <div class="otray"><div class="drawer-body" id="body-milestones"></div></div>
+      <div class="ofront" data-drawer="milestones" title="STARS — commendations"><span class="opull"></span><span class="olabel">STARS</span></div>
     </div>
   </div>
   <script src="app.js"></script>
